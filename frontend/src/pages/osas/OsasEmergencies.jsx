@@ -82,7 +82,9 @@ export default function OsasEmergencies() {
         <div>
           <div className="osas-main-title">Emergency / SOS cases</div>
           <div className="osas-main-sub">
-            Every SOS alert students have sent, with live status and response tracking.
+            Alerts students have sent in. OSAS logs and follows up on each case here -
+            for anything needing an immediate physical response, students are directed
+            to call barangay tanod, campus security, or the police directly.
           </div>
         </div>
       </div>
@@ -91,7 +93,7 @@ export default function OsasEmergencies() {
 
       {activeCount > 0 && (
         <div className="error-banner" style={{ background:"#fbe4dc", color:"#7a3a23", fontWeight:700 }}>
-          {activeCount} unattended active emergenc{activeCount===1?"y":"ies"} - please respond.
+          {activeCount} unattended active case{activeCount===1?"":"s"} - please review and follow up.
         </div>
       )}
 

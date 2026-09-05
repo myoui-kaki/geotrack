@@ -1,16 +1,51 @@
 // src/pages/student/StudentSOS.jsx
 //
-// Emergency Assistance / SOS module (student side). A student picks an
-// emergency category, the browser's geolocation is captured automatically
-// if permission is granted, and the alert goes straight to OSAS. While a
-// case is open (Active or Responding) this page shows its live timeline
-// instead of the trigger form, so a student can't accidentally send a
-// second alert on top of one already in progress.
+// Emergency Assistance / SOS module (student side).
+//
+// OSAS is a notifier/coordinator here, not a first responder - they log the
+// case, may reach out, and can help point the student to the right people,
+// but they cannot dispatch physical help on their own. Because of that, this
+// page leads with a set of direct emergency contacts (barangay tanod, campus
+// security, PNP) that a student can call or text immediately.
+//
+// Those contacts are a plain JS constant baked into the app bundle, so they
+// render instantly with no network call - they work even with no data/wifi,
+// as long as the app itself was already loaded. Calling and texting use the
+// phone's own cellular (GSM) connection, not mobile data, so tel:/sms: links
+// still work when there is no signal for data but the phone can still call
+// or text.
+//
+// Separately, a student can still notify OSAS the same way as before -
+// picking a category, optionally sharing location, and sending an alert
+// that OSAS will see and log. That part still needs internet, so failures
+// are caught and explained rather than left as a generic error.
 
 import { useEffect, useState } from "react";
 import { api } from "../../api/client";
 
 const CATEGORIES = ["Medical Emergency", "Safety Threat", "Fire", "Natural Disaster", "Other"];
+
+// TODO: replace the barangay/campus rows with your actual numbers before
+// the defense/demo. 911 and 117 are the real nationwide PH hotlines and can
+// stay as-is.
+const EMERGENCY_CONTACTS = [
+  { name: "National Emergency Hotline", number: "911", note: "Police, fire, medical - nationwide" },
+  { name: "PNP Text Hotline", number: "117", note: "Text for police assistance" },
+  { name: "Barangay VII Tanod", number: "09XXXXXXXXX", note: "Update with the actual barangay contact" },
+  { name: "OSAS / Campus Security", number: "09XXXXXXXXX", note: "Update with the actual campus security line" },
+];
+
+function telHref(number) {
+  return `tel:${number.replace(/\s+/g, "")}`;
+}
+
+function smsHref(number, coords) {
+  const base = "I need help. This is an emergency.";
+  const loc = coords
+    ? ` My location: https://maps.google.com/?q=${coords.latitude},${coords.longitude}`
+    : "";
+  return `sms:${number.replace(/\s+/g, "")}?body=${encodeURIComponent(base + loc)}`;
+}
 
 const STATUS_STYLE = {
   Active:     { bg: "#fbe4dc", color: "#7a3a23" },
@@ -57,6 +92,36 @@ function Timeline({ entries }) {
   );
 }
 
+// Always rendered, regardless of network status - these are plain data and
+// tel:/sms: links, not API calls, so they work with no wifi/data as long as
+// the phone still has cellular signal.
+function EmergencyContactsCard({ coords }) {
+  return (
+    <div className="card" style={{ borderLeft:"4px solid var(--pin)" }}>
+      <div className="card-title">Direct emergency contacts</div>
+      <p style={{ fontSize:11.5, color:"#6b6457", margin:"4px 0 12px" }}>
+        Call or text these directly for immediate help - this works even without
+        mobile data or wifi, as long as you have phone signal.
+      </p>
+      {EMERGENCY_CONTACTS.map(c => (
+        <div key={c.name} style={{
+          display:"flex", justifyContent:"space-between", alignItems:"center",
+          padding:"10px 0", borderBottom:"1px solid #ece7da", gap:10,
+        }}>
+          <div style={{ minWidth:0 }}>
+            <div style={{ fontSize:12.5, fontWeight:700 }}>{c.name}</div>
+            <div style={{ fontSize:11, color:"#a39c8a" }}>{c.number} - {c.note}</div>
+          </div>
+          <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+            <a className="btn" href={telHref(c.number)} style={{ fontSize:11.5, padding:"6px 10px" }}>Call</a>
+            <a className="btn" href={smsHref(c.number, coords)} style={{ fontSize:11.5, padding:"6px 10px" }}>Text</a>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function StudentSOS() {
   const [cases, setCases] = useState(null);
   const [error, setError] = useState("");
@@ -66,11 +131,22 @@ export default function StudentSOS() {
   const [coords, setCoords] = useState(null);
   const [sending, setSending] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [offlineNotice, setOfflineNotice] = useState(false);
+
+  // A fetch() that fails before reaching the server (no connection at all)
+  // throws a plain TypeError - that's the signal we treat as "offline"
+  // rather than a normal request error.
+  function isNetworkError(err) {
+    return err instanceof TypeError || !navigator.onLine;
+  }
 
   function loadCases() {
     api.student.myEmergencies()
       .then(setCases)
-      .catch(err => setError(err.message));
+      .catch(err => {
+        if (isNetworkError(err)) { setCases([]); setOfflineNotice(true); }
+        else setError(err.message);
+      });
   }
 
   useEffect(() => { loadCases(); }, []);
@@ -107,7 +183,11 @@ export default function StudentSOS() {
       setConfirming(false); setCategory(""); setDetails(""); setCoords(null); setLocationState("idle");
       loadCases();
     } catch (err) {
-      setError(err.message);
+      if (isNetworkError(err)) {
+        setError("Could not reach OSAS - you appear to be offline. Use the direct contacts above to call or text for help right away.");
+      } else {
+        setError(err.message);
+      }
     } finally {
       setSending(false);
     }
@@ -132,12 +212,20 @@ export default function StudentSOS() {
       </div>
       <div className="student-body">
         {error && <div className="error-banner">{error}</div>}
+        {offlineNotice && !error && (
+          <div className="error-banner" style={{ background:"#fdeecb", color:"#8a6414" }}>
+            You appear to be offline. Your alert history can't be checked right now, but
+            you can still call or text the emergency contacts below.
+          </div>
+        )}
+
+        <EmergencyContactsCard coords={coords} />
 
         {cases === null ? (
-          <div className="card"><p style={{fontSize:12.5,color:"#6b6457"}}>Loading...</p></div>
+          <div className="card" style={{ marginTop:14 }}><p style={{fontSize:12.5,color:"#6b6457"}}>Loading...</p></div>
 
         ) : activeCase ? (
-          <div className="card" style={{ borderLeft:"4px solid var(--pin)" }}>
+          <div className="card" style={{ marginTop:14, borderLeft:"4px solid var(--pin)" }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
               <div>
                 <div className="card-title" style={{ marginBottom:4 }}>{activeCase.category}</div>
@@ -162,10 +250,12 @@ export default function StudentSOS() {
           </div>
 
         ) : confirming ? (
-          <div className="card">
-            <div className="card-title">Confirm SOS - {category}</div>
+          <div className="card" style={{ marginTop:14 }}>
+            <div className="card-title">Notify OSAS - {category}</div>
             <p style={{ fontSize:12, color:"#6b6457", margin:"6px 0 12px" }}>
-              This sends an alert straight to OSAS with your details below. Only send this if you genuinely need help.
+              This lets OSAS know what's happening and logs it on their end. OSAS
+              can coordinate and follow up, but for anything urgent, call or text
+              the direct contacts above first.
             </p>
             <div style={{ fontSize:11.5, marginBottom:12 }}>
               {locationState === "locating" && <span style={{color:"#8a6414"}}>Getting your location...</span>}
@@ -182,16 +272,17 @@ export default function StudentSOS() {
                 Back
               </button>
               <button className="btn primary" style={{ background:"var(--pin)" }} onClick={handleSendSOS} disabled={sending}>
-                {sending ? "Sending..." : "Send SOS now"}
+                {sending ? "Sending..." : "Notify OSAS now"}
               </button>
             </div>
           </div>
 
         ) : (
           <>
-            <div className="card" style={{ textAlign:"center", padding:"28px 20px" }}>
+            <div className="card" style={{ marginTop:14, textAlign:"center", padding:"28px 20px" }}>
               <div style={{ fontSize:12.5, color:"#6b6457", marginBottom:14 }}>
-                In an emergency, tap a category below to alert OSAS immediately.
+                Pick a category to notify OSAS so they're aware and can follow up.
+                For life-threatening emergencies, use the direct contacts above.
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
                 {CATEGORIES.map(cat => (
