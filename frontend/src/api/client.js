@@ -1,14 +1,18 @@
 // src/api/client.js - GeoTrack API v3
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
+// Exported so pages that need to build a download URL by hand (file
+// downloads via fetch+blob, not JSON) use the exact same base the rest of
+// the app uses - includes the "/api" prefix and the right fallback for
+// local dev, instead of reading import.meta.env.VITE_API_URL directly and
+// silently hitting the Vite dev server itself when that var is unset.
+export { API_BASE_URL };
 
 // ===== Dual Session Support (Student + OSAS) =====
 
-function isOsasPortal() {
-  return window.location.pathname.startsWith("/osas");
-}
-
 function getPrefix() {
-  return isOsasPortal() ? "osas" : "student";
+  if (window.location.pathname.startsWith("/osas")) return "osas";
+  if (window.location.pathname.startsWith("/barangay")) return "barangay";
+  return "student";
 }
 
 function getToken() {
@@ -78,6 +82,9 @@ export const api = {
   setup2FA:         () => request("/auth/2fa/setup",{method:"POST"}),
   enable2FA:        code => request(`/auth/2fa/enable?code=${code}`,{method:"POST"}),
   disable2FA:       () => request("/auth/2fa/disable",{method:"POST"}),
+  // Read-only, works from any portal - whichever token is stored for the
+  // current path (student/osas/barangay) is what gets sent.
+  contactsDirectory: () => request("/contacts/directory"),
 
   student: {
     myProfile:          ()        => request("/student/me"),
@@ -93,6 +100,7 @@ export const api = {
     updateStatusUpdate: (uid,p)   => request(`/student/status-updates/${uid}`,{method:"PUT",body:p}),
     deleteStatusUpdate: uid       => request(`/student/status-updates/${uid}`,{method:"DELETE"}),
     reportConcern:      p         => request("/student/concerns",{method:"POST",body:p}),
+    myConcerns:         ()        => request("/student/concerns"),
   myBoardingHouse:    ()        => request("/student/my-boarding-house"),
   getComplianceHistory: () => request("/student/compliance"),
   getComplianceStatus: () => request("/student/compliance/status"),
@@ -130,6 +138,8 @@ export const api = {
     deleteStudent:      sid          => request(`/osas/students/${sid}`,{method:"DELETE"}),
     auditLogs:          (params={})  => { const q=new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([,v])=>v!=null&&v!==""))); return request(`/osas/audit-logs?${q}`); },
     generateTallyReport:(groups,m)   => { const p=new URLSearchParams({group_by:groups.join(",")}); if(m)p.append("month_label",m); return request(`/osas/reports/tally?${p}`); },
+    generateNarrativeReport:(groups,m,note) => { const p=new URLSearchParams({group_by:groups.join(",")}); if(m)p.append("month_label",m); if(note)p.append("admin_note",note); return request(`/osas/reports/narrative?${p}`); },
+    chatNarrative: (groups,m,narrative,messages) => request(`/osas/reports/narrative/chat`, {method:"POST", body:{group_by:groups.join(","), month_label:m||null, narrative, messages}}),
    complianceDashboard: () =>
     request("/osas/compliance/dashboard"),
     listEmergencies:    (status) => request(`/osas/emergencies${status?`?status=${encodeURIComponent(status)}`:""}`),
@@ -145,6 +155,18 @@ export const api = {
     checkMissedSubmissions:   () => request("/osas/compliance/check-missed",{method:"POST"}),
     updateComplianceFlags:    () => request("/osas/compliance/update-flags",{method:"POST"}),
     riskAssessment:           () => request("/osas/risk-assessment"),
+    myProfile:                () => request("/osas/me"),
+    updateProfile:            p  => request("/osas/me",{method:"PATCH",body:p}),
 },
+
+  barangay: {
+    myProfile: () => request("/barangay/me"),
+    updateProfile: p => request("/barangay/me", {method:"PATCH", body:p}),
+    listBoardingHouses: () => request("/barangay/boarding-houses"),
+    confirmPermit: (hid, has_barangay_permit) => request(`/barangay/boarding-houses/${hid}/permit`, {method:"PATCH", body:{has_barangay_permit}}),
+    listEmergencies: () => request("/barangay/emergencies"),
+    listConcerns: () => request("/barangay/concerns"),
+    geoMapPoints: () => request("/barangay/geo-map"),
+  },
 
 };

@@ -1,0 +1,233 @@
+/* src/theme.css
+   Shared design tokens and base styles used by BOTH the Student app
+   and the OSAS app. Page-specific files only add layout rules on top
+   of this -- colors, fonts, and components stay consistent across
+   both logins so the product still feels like one system. */
+
+:root{
+  --ink:#1c2b24;
+  --paper:#f6f4ee;
+  --moss:#2f5d4f;
+  --moss-dark:#203f36;
+  --pin:#c1502e;
+  --pin-soft:#f0d9cf;
+  --line:#d9d3c4;
+  --ok:#3c7a5c;
+  --warn:#c1502e;
+  --card:#ffffff;
+  --font-display:'Spectral', Georgia, serif;
+  --font-body:'Inter', system-ui, sans-serif;
+  --font-mono:'JetBrains Mono', monospace;
+
+  /* Spacing scale - not yet applied everywhere, but new/updated
+     components should use these instead of ad-hoc pixel values so
+     spacing stays consistent as more pages get the design pass. */
+  --space-1:4px;  --space-2:8px;  --space-3:12px; --space-4:16px;
+  --space-5:20px; --space-6:24px; --space-7:32px; --space-8:40px;
+
+  /* Radius scale - matches the values already used by .btn (sm),
+     .card (md) and the phone/login shells (lg), just named. */
+  --radius-sm:8px; --radius-md:14px; --radius-lg:22px; --radius-pill:999px;
+
+  /* Elevation scale - three levels of "lift" for hover/active states,
+     from the same shadow already used by .card:hover and login cards. */
+  --shadow-sm:0 2px 8px -4px rgba(28,43,36,.18);
+  --shadow-md:0 10px 28px -16px rgba(28,43,36,.35);
+  --shadow-lg:0 30px 60px -30px rgba(28,43,36,.35);
+
+  --ease-standard:cubic-bezier(.4,0,.2,1);
+  --duration-fast:150ms; --duration-base:220ms; --duration-slow:380ms;
+}
+
+*{box-sizing:border-box; margin:0; padding:0;}
+html,body,#root{height:100%;}
+body{
+  font-family:var(--font-body);
+  background:var(--paper);
+  color:var(--ink);
+  -webkit-font-smoothing:antialiased;
+}
+
+.brand-mark{
+  display:flex; align-items:center; gap:10px;
+  font-family:var(--font-mono); letter-spacing:.12em; font-size:12px; text-transform:uppercase;
+}
+.pin-dot{width:9px;height:9px;border-radius:50%; background:var(--pin); box-shadow:0 0 0 4px rgba(193,80,46,.25);}
+
+.btn{
+  padding:9px 16px; border-radius:8px; border:1px solid var(--line); background:var(--card);
+  font-size:13px; font-weight:600; cursor:pointer; font-family:var(--font-body); color:var(--ink);
+}
+.btn.primary{background:var(--moss-dark); color:#f3efe4; border:none;}
+.btn.primary:hover{background:var(--moss);}
+.btn:disabled{opacity:.5; cursor:not-allowed;}
+
+.geotrack-footer{
+  text-align:center;
+  font-size:11.5px;
+  color:#857d6c;
+  padding:16px 12px 10px;
+  margin-top:auto;
+  border-top:1px solid var(--line);
+  letter-spacing:.01em;
+}
+.geotrack-footer-sub{ color:#a39c8a; }
+@media print{ .geotrack-footer{ display:none; } }
+
+/* ── Motion & interaction polish (applies wherever these shared classes
+   are used, across student / OSAS / barangay portals) ─────────────────── */
+@keyframes gt-fade-up{ from{ opacity:0; transform:translateY(10px); } to{ opacity:1; transform:translateY(0); } }
+@keyframes gt-fade-in{ from{ opacity:0; } to{ opacity:1; } }
+@keyframes gt-pop{ from{ opacity:0; transform:scale(.94); } to{ opacity:1; transform:scale(1); } }
+@keyframes gt-pulse{ 0%,100%{ box-shadow:0 0 0 0 rgba(193,80,46,.35); } 50%{ box-shadow:0 0 0 6px rgba(193,80,46,0); } }
+@keyframes gt-shimmer{ 0%{ background-position:200% 0; } 100%{ background-position:-200% 0; } }
+@keyframes gt-spin{ to{ transform:rotate(360deg); } }
+/* Two-ring radar ping used behind the auth "brand" panels -- a slow outward
+   pulse that reads as "actively scanning a location" rather than decoration. */
+@keyframes gt-radar-ping{
+  0%{ transform:scale(.7); opacity:.55; }
+  70%{ opacity:0; }
+  100%{ transform:scale(1.15); opacity:0; }
+}
+
+.page-fade{ animation: gt-fade-up .38s ease both; }
+
+/* Auth screens (student/OSAS/barangay login, 2FA, OTP, forgot/reset password
+   all share these two class names) get one consistent entrance + a toast-like
+   lift on their card, instead of the abrupt "just appears" default. */
+.student-login-card, .osas-login-card{ animation: gt-pop .42s var(--ease-standard) both; }
+
+/* Small inline spinner for buttons mid-submit. Text stays visible next to it
+   (never replaces it) so the loading state is still readable with motion off. */
+.btn-spinner{
+  display:inline-block; width:13px; height:13px; margin-right:8px; vertical-align:-2px;
+  border:2px solid rgba(255,255,255,.4); border-top-color:#fff; border-radius:50%;
+  animation: gt-spin .7s linear infinite;
+}
+.btn:not(.primary) .btn-spinner{ border-color:rgba(47,93,79,.25); border-top-color:var(--moss-dark); }
+
+/* Skeleton loading blocks -- groundwork for table/card/chart loading states;
+   drop this class on a placeholder div sized like the real content. */
+.skeleton{
+  background:linear-gradient(90deg,#e9e4d6 25%,#f3efe4 37%,#e9e4d6 63%);
+  background-size:400% 100%; animation:gt-shimmer 1.4s ease infinite;
+  border-radius:var(--radius-sm); color:transparent;
+}
+
+/* Modal enter/exit (Terms & Conditions, and any future confirm/detail dialogs). */
+.modal-overlay{ animation: gt-fade-in .2s ease both; }
+.modal-panel{ animation: gt-pop .28s var(--ease-standard) both; }
+
+/* Visible keyboard focus everywhere, including inside the login/table/sidebar
+   components that only had default browser focus rings before. */
+:focus-visible{ outline:2px solid var(--moss); outline-offset:2px; border-radius:4px; }
+.btn:focus-visible{ outline-offset:3px; }
+
+/* Password show/hide toggle -- small color transition instead of an instant
+   text swap, used on every login/registration/reset password field. */
+.pw-toggle{ transition: color var(--duration-fast) var(--ease-standard); }
+.pw-toggle:hover{ color:var(--moss); }
+
+.btn{ transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard), transform var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard); }
+.btn:hover:not(:disabled){ transform: translateY(-1px); }
+.btn:active:not(:disabled){ transform: translateY(0) scale(.97); }
+.btn.primary:hover{ box-shadow: var(--shadow-md); }
+
+.card{ transition: transform var(--duration-base) var(--ease-standard), box-shadow var(--duration-base) var(--ease-standard), opacity var(--duration-base) var(--ease-standard); animation: gt-fade-up .32s ease both; }
+.card:hover{ box-shadow: var(--shadow-md); }
+
+.osas-stat-card{ animation: gt-pop .3s ease both; }
+.osas-stat-card .stat-num{ transition: color .2s ease; }
+
+.badge.warn, .badge.pending{ animation: gt-pulse 2.2s ease-in-out infinite; }
+
+/* An open SOS case (Active/Responding) stays visually "live" until it's
+   resolved or cancelled -- same restrained pulse as a pending/warn badge,
+   not a flashing alarm. */
+.sos-pill-open{ animation: gt-pulse 2.2s ease-in-out infinite; }
+
+/* Custom Leaflet marker (replaces the default pin image) used anywhere a
+   single "this location" marker needs to feel alive rather than static --
+   currently the student home mini-map, reusable for any future map work. */
+.gt-map-pin{ position:relative; width:22px; height:22px; }
+.gt-map-pin-dot{
+  position:absolute; left:50%; top:50%; width:14px; height:14px; margin:-7px 0 0 -7px;
+  background:var(--pin); border:2px solid #fff; border-radius:50%;
+  box-shadow:0 1px 5px rgba(28,43,36,.4); animation: gt-pop .3s var(--ease-standard) both;
+}
+.gt-map-pin-ring{
+  position:absolute; left:50%; top:50%; width:14px; height:14px; margin:-7px 0 0 -7px;
+  border-radius:50%; border:2px solid var(--pin); animation: gt-radar-ping 2.2s ease-out infinite;
+}
+/* Non-urgent variant (e.g. a non-flagged student on the OSAS map) -- same
+   dot, calm moss green, no pulsing ring, so a map with many markers on it
+   stays readable and only the flagged ones draw the eye. */
+.gt-map-pin-dot.ok{ background:var(--moss); width:10px; height:10px; margin:-5px 0 0 -5px; }
+@media (prefers-reduced-motion: reduce){
+  .gt-map-pin-dot{ animation:none; } .gt-map-pin-ring{ animation:none; opacity:.3; }
+}
+
+/* Notification unread-count badge: pops in fresh whenever the count changes
+   (the component remounts it via a `key`), instead of the number just
+   silently updating. */
+.notif-badge-pop{ animation: gt-pop .3s var(--ease-standard) both; display:inline-block; }
+
+/* Compliance-state chip (student home, and reusable anywhere a student's
+   monthly-submission status needs to be shown at a glance). Pops in fresh
+   when the state changes (key-remounted), and if it lands on "pending" it
+   keeps the same gentle pulse every other pending/warn badge already has. */
+.compliance-chip{ animation: gt-pop .3s var(--ease-standard) both; }
+.badge.pending.compliance-chip{ animation: gt-pop .3s var(--ease-standard) both, gt-pulse 2.2s ease-in-out .3s infinite; }
+
+.nav-btn, .osas-nav-item{ transition: background .18s ease, color .18s ease, transform .15s ease; }
+.nav-btn:hover, .osas-nav-item:hover{ transform: translateX(2px); }
+
+.listing-row{ transition: background .15s ease, transform .15s ease; }
+.listing-row:hover{ background:#faf9f4; transform: translateX(2px); }
+
+.review-item{ animation: gt-fade-in .3s ease both; }
+
+@media (prefers-reduced-motion: reduce){
+  .page-fade, .card, .osas-stat-card, .badge.warn, .badge.pending, .review-item, .sos-pill-open,
+  .student-login-card, .osas-login-card, .error-banner, .review-empty,
+  .btn-spinner, .skeleton, .modal-overlay, .modal-panel, .notif-badge-pop, .compliance-chip{ animation:none !important; }
+  .osas-login-brand::before, .student-login-brand::before{ animation:none !important; opacity:.25; }
+  .loading-text::before{ animation:none !important; border-top-color:#e2dccc; }
+  .btn, .nav-btn, .osas-nav-item, .listing-row{ transition:none !important; }
+  .skeleton{ background:#e9e4d6; }
+}
+
+.card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px;}
+
+.field{margin-bottom:16px;}
+.field label{display:block; font-size:12.5px; font-weight:600; color:#544f43; margin-bottom:6px;}
+.field input, .field select, .field textarea{
+  width:100%; padding:11px 13px; border:1px solid var(--line); border-radius:9px;
+  font-size:14px; font-family:var(--font-body); background:#fffefb;
+}
+.field input:focus, .field select:focus, .field textarea:focus{outline:none; border-color:var(--moss);}
+.field textarea{resize:vertical; min-height:70px;}
+
+.badge{display:inline-block; padding:3px 9px; border-radius:20px; font-size:11px; font-weight:600;}
+.badge.ok{background:#e1f0e6; color:var(--ok);}
+.badge.warn{background:var(--pin-soft); color:var(--pin);}
+.badge.pending{background:#eee7d2; color:#8a6d2f;}
+
+.error-banner{
+  background:var(--pin-soft); color:#7a3a23; padding:10px 14px; border-radius:8px;
+  font-size:13px; margin-bottom:14px; animation: gt-fade-up .28s ease both;
+}
+
+.loading-text{
+  font-size:13px; color:#857d6c; padding:20px 0 20px 26px; position:relative;
+}
+.loading-text::before{
+  content:""; position:absolute; left:0; top:50%; margin-top:-8px;
+  width:15px; height:15px; border-radius:50%;
+  border:2px solid #e2dccc; border-top-color:var(--moss);
+  animation: gt-spin .8s linear infinite;
+}
+table{width:100%; border-collapse:collapse; font-size:13px;}
+th{text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:#857d6c; padding:8px 10px; border-bottom:1px solid var(--line);}
+td{padding:10px 10px; border-bottom:1px solid #ece7da;}
+tr:last-child td{border-bottom:none;}

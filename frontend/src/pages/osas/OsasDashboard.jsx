@@ -5,6 +5,7 @@ import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveCo
 import { api } from "../../api/client";
 import { useAuth } from "../../context/AuthContext";
 import OsasGeoMap from "../../components/OsasGeoMap";
+import CountUp from "../../components/CountUp";
 
 const COLORS = ["#2f5d4f","#c1502e","#d4a017","#5a8a3c","#6b6457","#203f36","#e07b39","#3c7a5c"];
 
@@ -33,8 +34,10 @@ export default function OsasDashboard() {
           <div className="osas-main-title">OSAS Dashboard</div>
           <div className="osas-main-sub">Real-time view of all off-campus students, San Pablo City.</div>
         </div>
-        <div className="osas-user-chip">
-          <div className="osas-avatar">{(fullName||"OS").slice(0,2).toUpperCase()}</div> {fullName}
+        <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+          <div className="osas-user-chip">
+            <div className="osas-avatar">{(fullName||"OS").slice(0,2).toUpperCase()}</div> {fullName}
+          </div>
         </div>
       </div>
 
@@ -52,7 +55,7 @@ export default function OsasDashboard() {
             ].map(s => (
               <div className="card osas-stat-card" key={s.label}>
                 <div className="stat-label">{s.label}</div>
-                <div className="stat-num" style={{color:s.color}}>{s.val}</div>
+                <div className="stat-num" style={{color:s.color}}><CountUp value={s.val} /></div>
                 <div className="stat-tag warn">{s.tag}</div>
               </div>
             ))}
@@ -150,43 +153,6 @@ export default function OsasDashboard() {
                   </ResponsiveContainer>
               }
             </div>
-          </div>
-
-          {/* -- Recent activities -- */}
-          <div className="card">
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-              <div className="panel-title" style={{marginBottom:0}}>Latest activities</div>
-              <button className="btn" style={{fontSize:12,padding:"5px 12px"}}
-                onClick={() => navigate("/osas/audit-logs")}>View all</button>
-            </div>
-            {stats.recent_activities.length === 0
-              ? <div className="review-empty">No activity yet.</div>
-              : stats.recent_activities.map(a => (
-                  <div key={a.id} style={{
-                    display:"flex",alignItems:"flex-start",gap:10,
-                    padding:"10px 0",borderBottom:"1px solid #ece7da",
-                  }}>
-                    <div style={{
-                      width:32,height:32,borderRadius:"50%",background:"#eef1e9",
-                      display:"flex",alignItems:"center",justifyContent:"center",
-                      fontSize:13,flexShrink:0,color:"var(--moss-dark)",fontWeight:700,
-                    }}>
-                      <ActionIcon action={a.action} />
-                    </div>
-                    <div style={{flex:1}}>
-                      <div style={{fontSize:13,fontWeight:600}}>
-                        <span style={{color:"var(--moss-dark)"}}>{a.actor}</span>
-                        {" "}<span style={{fontWeight:400,color:"#6b6457"}}>{a.action}d</span>
-                        {a.resource_label && <>{" "}<span style={{color:"var(--ink)"}}>{a.resource_label}</span></>}
-                      </div>
-                      {a.detail && <div style={{fontSize:11.5,color:"#a39c8a",marginTop:2}}>{a.detail}</div>}
-                    </div>
-                    <div style={{fontSize:11,color:"#a39c8a",flexShrink:0,paddingTop:2}}>
-                      {new Date(a.created_at).toLocaleString()}
-                    </div>
-                  </div>
-                ))
-            }
           </div>
         </>
       )}

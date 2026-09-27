@@ -5,6 +5,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "../../api/client";
+import CountUp from "../../components/CountUp";
 
 const STATUS_BADGE = { Submitted: "ok", Pending: "pending", Missed: "warn" };
 
@@ -60,10 +61,10 @@ export default function OsasCompliance() {
       {msg && <div className="badge ok" style={{ marginBottom: 14, display: "inline-block" }}>{msg}</div>}
 
       <div className="osas-grid osas-stat-row" style={{ marginBottom: 20 }}>
-        <div className="card osas-stat-card"><div className="stat-label">Submitted</div><div className="stat-num">{totals.Submitted}</div></div>
-        <div className="card osas-stat-card"><div className="stat-label">Pending</div><div className="stat-num">{totals.Pending}</div></div>
-        <div className="card osas-stat-card"><div className="stat-label">Missed</div><div className="stat-num">{totals.Missed}</div></div>
-        <div className="card osas-stat-card"><div className="stat-label">Flagged</div><div className="stat-num">{totals.flagged}</div></div>
+        <div className="card osas-stat-card"><div className="stat-label">Submitted</div><div className="stat-num"><CountUp value={totals.Submitted} /></div></div>
+        <div className="card osas-stat-card"><div className="stat-label">Pending</div><div className="stat-num"><CountUp value={totals.Pending} /></div></div>
+        <div className="card osas-stat-card"><div className="stat-label">Missed</div><div className="stat-num"><CountUp value={totals.Missed} /></div></div>
+        <div className="card osas-stat-card"><div className="stat-label">Flagged</div><div className="stat-num"><CountUp value={totals.flagged} /></div></div>
       </div>
 
       <div className="card" style={{ marginBottom: 20 }}>

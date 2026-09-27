@@ -17,6 +17,13 @@ class User(Base):
     course_section = Column(String, nullable=True)
     gender = Column(String, nullable=True)
     position = Column(String, nullable=True)
+    # Only set for role="barangay" - which barangay this account represents,
+    # e.g. "Brgy. Del Remedio". Used to scope what that account can see.
+    barangay_name = Column(String, nullable=True)
+    # Contact number shown to other portals (e.g. a barangay chairman's
+    # number surfaced to Student SOS, or an OSAS officer's number) -
+    # editable by the account itself from its own Profile page.
+    contact_number = Column(String, nullable=True)
 
     # Login security
     failed_login_attempts = Column(Integer, default=0)
@@ -56,6 +63,18 @@ class BoardingHouse(Base):
     submitted_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # Landlord/owner contact - visible to OSAS admins for verification and
+    # coordination purposes.
+    contact_person = Column(String, nullable=True)
+    contact_number = Column(String, nullable=True)
+
+    # A boarding house is only ever "is_verified" if it is in a barangay that
+    # participates in the permit-verification workflow (currently only
+    # Brgy. Del Remedio) AND that barangay account has confirmed it has a
+    # valid permit. Anything outside a participating barangay is always
+    # left unverified, regardless of what a student self-reports.
+    has_barangay_permit = Column(Boolean, default=False)
+
     status_updates = relationship("StatusUpdate", back_populates="boarding_house", cascade="all, delete-orphan")
     reviews        = relationship("Review",        back_populates="boarding_house", cascade="all, delete-orphan")
     submitter      = relationship("User", foreign_keys=[submitted_by_id])
@@ -74,6 +93,13 @@ class StatusUpdate(Base):
     is_flagged = Column(Boolean, default=False)
     flag_reason = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Documentation of the boarding house's condition - only collected the
+    # first time a student registers a boarding house, or when they
+    # transfer to a new one. A student staying at the same place month to
+    # month isn't asked to redo this every time.
+    photo_data_url = Column(Text, nullable=True)
+    amenities_checklist = Column(Text, nullable=True)
 
     student        = relationship("User",          back_populates="status_updates")
     boarding_house = relationship("BoardingHouse", back_populates="status_updates")
@@ -100,6 +126,13 @@ class Concern(Base):
     details = Column(Text, nullable=False)
     status = Column(String, default="open")
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Optional documentation of the boarding house's condition: a photo
+    # (stored as a base64 data URL - no external file storage configured
+    # for this project) and a checklist of which amenities are present,
+    # stored as a comma-separated list of amenity names.
+    photo_data_url = Column(Text, nullable=True)
+    amenities_checklist = Column(Text, nullable=True)
 
     student = relationship("User", back_populates="concerns")
 

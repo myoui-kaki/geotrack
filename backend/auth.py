@@ -57,3 +57,8 @@ def require_osas_admin(user: models.User = Depends(get_current_user)):
     if user.role != "osas_admin":
         raise HTTPException(status_code=403, detail="This endpoint is for OSAS administrator accounts only.")
     return user
+
+def require_barangay(user: models.User = Depends(get_current_user)):
+    if user.role != "barangay":
+        raise HTTPException(status_code=403, detail="This endpoint is for barangay accounts only.")
+    return user

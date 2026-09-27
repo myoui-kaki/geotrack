@@ -90,6 +90,8 @@ export default function StudentLogin() {
   const [bhName, setBhName] = useState("");
   const [bhBarangay, setBhBarangay] = useState("");
   const [bhAddress, setBhAddress] = useState("");
+  const [landlordName, setLandlordName] = useState("");
+  const [landlordContact, setLandlordContact] = useState("");
   const [geocoding, setGeocoding] = useState(false);
   const [pinnedLocation, setPinnedLocation] = useState(null);
   const [geocodeError, setGeocodeError] = useState("");
@@ -136,6 +138,8 @@ export default function StudentLogin() {
           boarding_house_barangay: bhBarangay || null,
           boarding_house_latitude: pinnedLocation?.lat ?? null,
           boarding_house_longitude: pinnedLocation?.lng ?? null,
+          landlord_name: landlordName || null,
+          landlord_contact: landlordContact || null,
         });
       }
       if (session.role !== "student") { setError("This account is not registered as a student."); setLoading(false); return; }
@@ -279,6 +283,17 @@ export default function StudentLogin() {
                 <label>Street / landmark <span style={{ color:"#a39c8a" }}>(optional)</span></label>
                 <input value={bhAddress} onChange={e => { setBhAddress(e.target.value); setPinnedLocation(null); }} placeholder="e.g. near SPC public market" />
               </div>
+              <div className="field">
+                <label>Landlord name <span style={{ color:"#a39c8a" }}>(optional)</span></label>
+                <input value={landlordName} onChange={e => setLandlordName(e.target.value)} placeholder="e.g. Melba Belen" />
+              </div>
+              <div className="field">
+                <label>Landlord contact number <span style={{ color:"#a39c8a" }}>(optional)</span></label>
+                <input value={landlordContact} onChange={e => setLandlordContact(e.target.value)} placeholder="e.g. 0917-503-4490" />
+              </div>
+              <p style={{ fontSize:11, color:"#a39c8a", lineHeight:1.5, marginTop:-4, marginBottom:10 }}>
+                If OSAS doesn't have this on file yet for your boarding house, it will fill in automatically from what you provide here.
+              </p>
               <button type="button" className="btn" style={{ width:"100%", padding:10 }}
                 onClick={handleFindLocation} disabled={geocoding || !bhBarangay.trim()}>
                 {geocoding ? "Finding location..." : "Find location on map"}

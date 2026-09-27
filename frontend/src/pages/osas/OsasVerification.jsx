@@ -52,6 +52,7 @@ export default function OsasVerification() {
   }
 
   async function handleVerify(hid) {
+    if (!window.confirm("Mark this boarding house as verified?")) return;
     try { await api.osas.verifyBoardingHouse(hid); load(); }
     catch(err) { setError(err.message); }
   }
@@ -65,7 +66,8 @@ export default function OsasVerification() {
 
   function startEdit(h) {
     setEditingId(h.id);
-    setEditForm({ name:h.name, barangay:h.barangay, monthly_rate:h.monthly_rate ?? "", address:"" });
+    setEditForm({ name:h.name, barangay:h.barangay, monthly_rate:h.monthly_rate ?? "", address:"",
+                  contact_person:h.contact_person||"", contact_number:h.contact_number||"" });
     setEditPinned(h.latitude != null ? { lat:h.latitude, lng:h.longitude, displayName:h.barangay } : null);
     setEditGeoError(""); setShowEditMap(h.latitude != null);
   }
@@ -89,6 +91,8 @@ export default function OsasVerification() {
         monthly_rate:editForm.monthly_rate === "" ? null : parseFloat(editForm.monthly_rate),
         latitude:editPinned?.lat ?? null,
         longitude:editPinned?.lng ?? null,
+        contact_person: editForm.contact_person || null,
+        contact_number: editForm.contact_number || null,
       });
       setEditingId(null); load();
     } catch(err) { setError(err.message); }
@@ -131,7 +135,7 @@ export default function OsasVerification() {
         : (
           <table>
             <tbody>
-              <tr><th>Boarding house</th><th>Barangay</th><th>Submitted by</th><th>Status</th><th></th></tr>
+              <tr><th>Boarding house</th><th>Barangay</th><th>Landlord</th><th>Contact</th><th>Submitted by</th><th>Status</th><th></th></tr>
               {houses.map(h => (
                 <>
                   <tr key={h.id}>
@@ -143,7 +147,13 @@ export default function OsasVerification() {
                         <td>
                           <input value={editForm.barangay} onChange={e => setEditForm({...editForm,barangay:e.target.value})} style={{width:"100%",fontSize:12,padding:4}} />
                         </td>
-                        <td colSpan={2} style={{fontSize:11,color:"#857d6c"}}>
+                        <td>
+                          <input value={editForm.contact_person||""} onChange={e => setEditForm({...editForm,contact_person:e.target.value})} style={{width:"100%",fontSize:12,padding:4}} placeholder="Landlord name" />
+                        </td>
+                        <td>
+                          <input value={editForm.contact_number||""} onChange={e => setEditForm({...editForm,contact_number:e.target.value})} style={{width:"100%",fontSize:12,padding:4}} placeholder="Contact number" />
+                        </td>
+                        <td colSpan={3} style={{fontSize:11,color:"#857d6c"}}>
                           Rate: <input type="number" value={editForm.monthly_rate} onChange={e => setEditForm({...editForm,monthly_rate:e.target.value})} style={{width:70,fontSize:11,padding:2}} />
                           {" "}Street/landmark:{" "}
                           <input value={editForm.address||""} onChange={e => setEditForm({...editForm,address:e.target.value})} style={{width:140,fontSize:11,padding:2}} placeholder="optional" />
@@ -173,8 +183,13 @@ export default function OsasVerification() {
                       <>
                         <td>{h.name}</td>
                         <td>{h.barangay}</td>
+                        <td style={{fontSize:12,color:"#6b6457"}}>{h.contact_person||"-"}</td>
+                        <td style={{fontSize:12,color:"#6b6457"}}>{h.contact_number||"-"}</td>
                         <td style={{fontSize:12,color:"#6b6457"}}>{h.submitted_by||"-"}</td>
-                        <td><span className={`badge ${h.is_verified?"ok":"pending"}`}>{h.is_verified?"Verified":"Pending"}</span></td>
+                        <td>
+                          <span className={`badge ${h.is_verified?"ok":"pending"}`}>{h.is_verified?"Verified":"Pending"}</span>
+                          {h.has_barangay_permit && <div style={{fontSize:10,color:"var(--moss-dark)",marginTop:2}}>Barangay-confirmed permit</div>}
+                        </td>
                         <td style={{whiteSpace:"nowrap"}}>
                           {!h.is_verified && <button className="btn primary" style={{padding:"5px 10px",fontSize:11,marginRight:4}} onClick={() => handleVerify(h.id)}>Verify</button>}
                           {h.is_verified && <button className="btn" style={{padding:"5px 10px",fontSize:11,marginRight:4,color:"var(--pin)"}} onClick={() => handleReject(h.id)}>Unverify</button>}
@@ -190,7 +205,7 @@ export default function OsasVerification() {
                   </tr>
                   {expandedHouseId === h.id && (
                     <tr key={`reviews-${h.id}`}>
-                      <td colSpan={5} style={{background:"#faf9f5",padding:"8px 12px"}}>
+                      <td colSpan={7} style={{background:"#faf9f5",padding:"8px 12px"}}>
                         {!reviewsByHouse[h.id] ? <div className="loading-text">Loading reviews...</div>
                         : reviewsByHouse[h.id].length === 0 ? <div className="review-empty">No reviews yet.</div>
                         : reviewsByHouse[h.id].map(r => (

@@ -32,6 +32,8 @@ class RegisterStudentRequest(BaseModel):
     boarding_house_barangay: Optional[str] = None
     boarding_house_latitude: Optional[float] = None
     boarding_house_longitude: Optional[float] = None
+    landlord_name: Optional[str] = None
+    landlord_contact: Optional[str] = None
 
     @field_validator("email")
     @classmethod
@@ -103,6 +105,8 @@ class BoardingHouseOut(BaseModel):
     monthly_rate: Optional[float] = None
     latitude: Optional[float] = None; longitude: Optional[float] = None
     is_verified: bool; submitted_by: Optional[str] = None
+    contact_person: Optional[str] = None; contact_number: Optional[str] = None
+    has_barangay_permit: bool = False
     class Config: from_attributes = True
 
 class BoardingHouseUpdate(BaseModel):
@@ -110,9 +114,49 @@ class BoardingHouseUpdate(BaseModel):
     monthly_rate: Optional[float] = None
     latitude: Optional[float] = None; longitude: Optional[float] = None
     submitted_by: Optional[str] = None
+    contact_person: Optional[str] = None; contact_number: Optional[str] = None
 
 class BoardingHouseReject(BaseModel):
     reason: Optional[str] = None
+
+class BarangayPermitUpdate(BaseModel):
+    has_barangay_permit: bool
+
+class BarangayProfileOut(BaseModel):
+    id: int; full_name: str; email: EmailStr
+    barangay_name: Optional[str] = None
+    contact_number: Optional[str] = None
+    created_at: datetime
+    class Config: from_attributes = True
+
+class BarangayProfileUpdate(BaseModel):
+    full_name: Optional[str] = None
+    contact_number: Optional[str] = None
+
+class OsasProfileOut(BaseModel):
+    id: int; full_name: str; email: EmailStr
+    position: Optional[str] = None
+    contact_number: Optional[str] = None
+    created_at: datetime
+    class Config: from_attributes = True
+
+class OsasProfileUpdate(BaseModel):
+    full_name: Optional[str] = None
+    position: Optional[str] = None
+    contact_number: Optional[str] = None
+
+# Read-only directory of barangay/OSAS contacts, visible across all three
+# portals (any authenticated role) - e.g. shown as the "Barangay" and
+# "OSAS" emergency contacts on the Student SOS page instead of a fixed
+# placeholder number.
+class ContactDirectoryEntry(BaseModel):
+    full_name: str
+    role_label: Optional[str] = None
+    contact_number: Optional[str] = None
+
+class ContactDirectoryOut(BaseModel):
+    barangay_contacts: List[ContactDirectoryEntry] = []
+    osas_contacts: List[ContactDirectoryEntry] = []
 
 class AnnouncementCreate(BaseModel):
     subject: str
@@ -128,12 +172,16 @@ class StatusUpdateCreate(BaseModel):
     new_barangay: Optional[str] = None
     note: Optional[str] = None
     month_label: str
+    photo_data_url: Optional[str] = None
+    amenities_checklist: Optional[List[str]] = None
 
 class StatusUpdateEdit(BaseModel):
     status_type: Optional[Literal["same", "transferred", "moved_home"]] = None
     new_boarding_house_name: Optional[str] = None
     new_barangay: Optional[str] = None
     note: Optional[str] = None
+    photo_data_url: Optional[str] = None
+    amenities_checklist: Optional[List[str]] = None
 
 class StatusUpdateOut(BaseModel):
     id: int; status_type: str
@@ -142,6 +190,8 @@ class StatusUpdateOut(BaseModel):
     note: Optional[str] = None
     month_label: str; is_flagged: bool
     flag_reason: Optional[str] = None; created_at: datetime
+    photo_data_url: Optional[str] = None
+    amenities_checklist: Optional[str] = None
     class Config: from_attributes = True
 
 class StatusUpdateAdminOut(StatusUpdateOut):
@@ -164,9 +214,13 @@ class ReviewOut(BaseModel):
 class ConcernCreate(BaseModel):
     category: Literal["safety", "landlord", "maintenance", "other"]
     details: str
+    photo_data_url: Optional[str] = None
+    amenities_checklist: Optional[List[str]] = None
 
 class ConcernOut(BaseModel):
     id: int; category: str; details: str; status: str; created_at: datetime
+    photo_data_url: Optional[str] = None
+    amenities_checklist: Optional[str] = None
     class Config: from_attributes = True
 
 class ConcernAdminOut(ConcernOut):
@@ -192,6 +246,12 @@ class MyProfileOut(BaseModel):
     id: int; full_name: str; email: EmailStr
     course_section: Optional[str] = None; gender: Optional[str] = None
     created_at: datetime; two_fa_enabled: bool = False
+    # Current boarding house, populated server-side from the student's most
+    # recent status update (not stored on the user record itself).
+    current_boarding_house: Optional[str] = None
+    current_barangay: Optional[str] = None
+    landlord_name: Optional[str] = None
+    landlord_contact: Optional[str] = None
     class Config: from_attributes = True
 
 class MyProfileUpdate(BaseModel):
@@ -203,6 +263,7 @@ class MyProfileUpdate(BaseModel):
 # ─── Tally report ─────────────────────────────────────────────────────────────
 class TallyReportRow(BaseModel):
     group_label: str; count: int; student_names: List[str] = []
+    amenities: Optional[str] = None
 
 class TallyReportSection(BaseModel):
     group_by: str; rows: List[TallyReportRow]; total: int
@@ -327,3 +388,28 @@ class EmergencyCaseOut(BaseModel):
     resolved_at: Optional[datetime] = None
     timeline: List[EmergencyTimelineOut] = []
     class Config: from_attributes = True
+
+# ─── Reports - AI narrative ───────────────────────────────────────────────────
+class NarrativeReportPhoto(BaseModel):
+    photo_data_url: str
+    caption: str
+
+class NarrativeReportOut(BaseModel):
+    narrative: str
+    generated_by: str  # "gemini" | "claude" | "summary" (fallback when no API key is configured)
+    photos: List[NarrativeReportPhoto] = []
+
+class NarrativeChatMessage(BaseModel):
+    role: str  # "user" | "assistant"
+    text: str
+
+class NarrativeChatIn(BaseModel):
+    group_by: str
+    month_label: Optional[str] = None
+    narrative: str
+    messages: List[NarrativeChatMessage] = []
+
+class NarrativeChatOut(BaseModel):
+    reply: str
+    narrative: str
+    generated_by: str

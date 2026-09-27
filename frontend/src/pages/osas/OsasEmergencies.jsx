@@ -8,6 +8,7 @@
 
 import { useEffect, useState, Fragment } from "react";
 import { api } from "../../api/client";
+import EmergencyLocationMap from "../../components/EmergencyLocationMap";
 
 const STATUS_FILTERS = ["All", "Active", "Responding", "Resolved", "Cancelled"];
 const STATUS_ACTIONS = ["Active", "Responding", "Resolved", "Cancelled"];
@@ -169,7 +170,9 @@ export default function OsasEmergencies() {
                             <strong>Student's note:</strong> {c.details}
                           </div>
                         )}
-                        <div className="panel-title" style={{ fontSize:12.5, marginBottom:8 }}>Timeline</div>
+                        <div className="panel-title" style={{ fontSize:12.5, marginBottom:8 }}>Location when SOS was sent</div>
+                        <EmergencyLocationMap latitude={c.latitude} longitude={c.longitude} />
+                        <div className="panel-title" style={{ fontSize:12.5, margin:"16px 0 8px" }}>Timeline</div>
                         {c.timeline.map((e, i) => (
                           <div key={e.id} style={{ display:"flex", gap:10, marginBottom: i===c.timeline.length-1?0:8 }}>
                             <div style={{

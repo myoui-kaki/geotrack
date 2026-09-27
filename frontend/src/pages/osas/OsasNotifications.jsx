@@ -12,12 +12,19 @@ const CATEGORY_LABEL = {
   sos_alert: "SOS alert",
   flagging: "Compliance flag",
   announcement: "Announcement",
+  compliance_missed: "Status update needed",
 };
 
 const CATEGORY_BADGE = {
   sos_alert: "warn",
   flagging: "warn",
   announcement: "pending",
+  compliance_missed: "pending",
+};
+
+const CLICKABLE_CATEGORY_ROUTE = {
+  sos_alert: "/osas/emergencies",
+  compliance_missed: "/osas/status-updates",
 };
 
 export default function OsasNotifications() {
@@ -57,7 +64,13 @@ export default function OsasNotifications() {
       <div className="osas-main-head">
         <div>
           <div className="osas-main-title">Notifications</div>
-          <div className="osas-main-sub">{unread} unread — automatic SOS alerts and flagging notices land here.</div>
+          <div className="osas-main-sub">{unread} unread</div>
+          <div style={{ fontSize: 11.5, color: "#a39c8a", marginTop: 2, maxWidth: 560 }}>
+            You'll get an alert here the moment a student's SOS comes in (Medical, Fire,
+            Safety, Natural Disaster or Other — the matching barangay is alerted too),
+            when a student's monthly status update is overdue, and when a student
+            gets auto-flagged for compliance.
+          </div>
         </div>
         {unread > 0 && <button className="btn" onClick={markAll}>Mark all as read</button>}
       </div>
@@ -73,9 +86,9 @@ export default function OsasNotifications() {
           items.map((n) => (
             <div key={n.id} style={{
               padding: "12px 4px", borderBottom: "1px solid #ece7da", opacity: n.is_read ? 0.6 : 1,
-              cursor: n.category === "sos_alert" ? "pointer" : "default",
+              cursor: CLICKABLE_CATEGORY_ROUTE[n.category] ? "pointer" : "default",
             }}
-              onClick={() => { if (n.category === "sos_alert") navigate("/osas/emergencies"); }}>
+              onClick={() => { const route = CLICKABLE_CATEGORY_ROUTE[n.category]; if (route) navigate(route); }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                 <span className={`badge ${CATEGORY_BADGE[n.category] || "pending"}`}>
                   {CATEGORY_LABEL[n.category] || n.category}

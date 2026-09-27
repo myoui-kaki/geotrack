@@ -29,13 +29,21 @@ export default function OsasAuditLogs() {
     const params = {};
     if (filterAction) params.action = filterAction;
     if (filterResource) params.resource_type = filterResource;
-    api.osas.auditLogs({ ...params, limit: 100 })
+    api.osas.auditLogs({ ...params, limit: 200 })
       .then(setLogs)
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
   }
 
-  const filtered = logs.filter(l => {
+  // Only OSAS admin activity here - sign-ins and the actions an admin
+  // deliberately triggers (sending an announcement, exporting a report,
+  // verifying a boarding house, managing an account, etc). Actions logged
+  // against a student's own account (submitting a review, a concern, a
+  // status update) live in their own pages already, so they're left out
+  // of this view to keep it to what OSAS itself did.
+  const adminLogs = logs.filter(l => l.actor_role === "osas_admin");
+
+  const filtered = adminLogs.filter(l => {
     if (!search) return true;
     return [l.actor_name, l.resource_label, l.detail, l.action]
       .some(v => v && v.toLowerCase().includes(search.toLowerCase()));
@@ -46,7 +54,10 @@ export default function OsasAuditLogs() {
       <div className="osas-main-head">
         <div>
           <div className="osas-main-title">Activity logs</div>
-          <div className="osas-main-sub">Full audit trail - who did what, to which resource, and when.</div>
+          <div className="osas-main-sub">
+            OSAS admin activity only - sign-ins plus the actions an admin took
+            (sent an announcement, generated a report, verified a boarding house, etc).
+          </div>
         </div>
       </div>
 

@@ -10,6 +10,7 @@ import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { api } from "../api/client";
+import BarangayContactLine from "./BarangayContactLine";
 
 const CAMPUS_CENTER = [14.0683, 121.325];
 
@@ -65,6 +66,8 @@ export default function StudentMiniMap({ height = 160 }) {
             <strong>{house.name}</strong>
             <br />
             {house.barangay}
+            <br />
+            <BarangayContactLine barangay={house.barangay} />
           </Popup>
         </Marker>
       </MapContainer>

@@ -5,6 +5,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api/client";
+import CountUp from "../../components/CountUp";
 
 const LEVEL_BADGE = {
   Low: "ok",
@@ -57,7 +58,7 @@ export default function OsasRiskAssessment() {
         {["Low", "Medium", "High", "Critical"].map((lvl) => (
           <div className="card osas-stat-card" key={lvl}>
             <div className="stat-label">{lvl} risk</div>
-            <div className="stat-num">{counts[lvl] || 0}</div>
+            <div className="stat-num"><CountUp value={counts[lvl] || 0} /></div>
           </div>
         ))}
       </div>

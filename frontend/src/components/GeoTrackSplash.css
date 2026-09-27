@@ -1,0 +1,231 @@
+/* src/components/GeoTrackSplash.css
+   Scoped to the gt-splash / gt-orbit classes so it can't collide with
+   anything in theme.css, osas.css or student.css. Colors reuse the
+   app's existing tokens from theme.css (--moss / --pin) so the splash
+   matches the rest of GeoTrack instead of introducing a new palette. */
+
+.gt-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  display: grid;
+  min-height: 100dvh;
+  place-items: center;
+  overflow: hidden;
+  color: #ffffff;
+  background: #000000;
+  animation: gt-splash-exit 450ms ease-in 2.8s forwards;
+}
+
+.gt-splash__content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  width: min(88vw, 35rem);
+  flex-direction: column;
+  align-items: center;
+  animation: gt-splash-reveal 750ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.gt-splash__logo-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.gt-splash__logo {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.gt-orbit {
+  position: absolute;
+  z-index: 3;
+  top: 31.5%;
+  left: 50.25%;
+  border: 1px solid color-mix(in srgb, var(--pin, #c1502e) 46%, transparent);
+  border-radius: 9999px;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.gt-orbit--outer {
+  width: 24%;
+  aspect-ratio: 1;
+  border-color: color-mix(in srgb, var(--moss, #2f5d4f) 70%, transparent);
+  animation: gt-orbit-spin 3.2s linear infinite;
+}
+
+.gt-orbit--outer span {
+  position: absolute;
+  top: 7%;
+  left: 22%;
+  width: 0.55rem;
+  aspect-ratio: 1;
+  border-radius: 9999px;
+  background: var(--pin, #c1502e);
+  box-shadow: 0 0 1rem color-mix(in srgb, var(--pin, #c1502e) 70%, transparent);
+}
+
+.gt-orbit--middle {
+  width: 17%;
+  aspect-ratio: 1;
+  animation: gt-radar-pulse 1.8s ease-out infinite;
+}
+
+.gt-splash__status {
+  display: flex;
+  min-height: 1.5rem;
+  align-items: center;
+  gap: 0.7rem;
+  margin-top: -3%;
+  color: color-mix(in srgb, #ffffff 64%, transparent);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.gt-splash__status p {
+  margin: 0;
+  animation: gt-status-in 360ms ease both;
+}
+
+.gt-splash__status-dot {
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 9999px;
+  background: var(--pin, #c1502e);
+  box-shadow: 0 0 0.75rem var(--pin, #c1502e);
+}
+
+.gt-splash__progress {
+  width: 9rem;
+  height: 1px;
+  margin-top: 1.2rem;
+  overflow: hidden;
+  background: color-mix(in srgb, #ffffff 12%, transparent);
+}
+
+.gt-splash__progress span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, var(--moss, #2f5d4f), var(--pin, #c1502e));
+  transform-origin: left;
+  animation: gt-progress 3s ease-in-out both;
+}
+
+.gt-splash__footer {
+  position: absolute;
+  bottom: 2.2rem;
+  margin: 0;
+  color: color-mix(in srgb, #ffffff 34%, transparent);
+  font-size: 0.62rem;
+  letter-spacing: 0.24em;
+}
+
+.gt-splash__glow {
+  position: absolute;
+  width: 32rem;
+  aspect-ratio: 1;
+  border-radius: 9999px;
+  filter: blur(8rem);
+  opacity: 0.12;
+}
+
+.gt-splash__glow--one {
+  top: -16rem;
+  right: -8rem;
+  background: var(--moss, #2f5d4f);
+}
+
+.gt-splash__glow--two {
+  bottom: -20rem;
+  left: -10rem;
+  background: var(--pin, #c1502e);
+}
+
+@keyframes gt-orbit-spin {
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
+@keyframes gt-radar-pulse {
+  0% {
+    opacity: 0.8;
+    transform: translate(-50%, -50%) scale(0.65);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.55);
+  }
+}
+
+@keyframes gt-splash-reveal {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
+
+@keyframes gt-splash-exit {
+  to {
+    opacity: 0;
+    transform: scale(1.03);
+  }
+}
+
+@keyframes gt-progress {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes gt-status-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.25rem);
+  }
+}
+
+@media (max-width: 420px) {
+  .gt-splash__content {
+    width: 112vw;
+    max-width: 26rem;
+  }
+
+  .gt-splash__status {
+    max-width: 88vw;
+    letter-spacing: 0.08em;
+    text-align: center;
+  }
+}
+
+@media (max-width: 900px) {
+  .gt-splash__content {
+    width: min(100vw, 28rem);
+  }
+
+  .gt-splash__status {
+    margin-top: 0.5rem;
+    font-size: 0.62rem;
+  }
+
+  .gt-splash__footer {
+    bottom: 1.5rem;
+    max-width: calc(100% - 2rem);
+    text-align: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gt-splash,
+  .gt-splash *,
+  .gt-splash *::before,
+  .gt-splash *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}

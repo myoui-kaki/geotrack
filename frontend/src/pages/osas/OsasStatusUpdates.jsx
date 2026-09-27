@@ -1,14 +1,42 @@
 // src/pages/osas/OsasStatusUpdates.jsx - with search + filter panel
 import { useEffect, useState } from "react";
 import { api } from "../../api/client";
+import MonthCalendar, { monthLabel } from "../../components/MonthCalendar";
 
-const MONTHS = [
-  new Date().toLocaleString("en-US", { month: "long", year: "numeric" }),
-  "July 2026",
-  "June 2026",
-  "May 2026",
-  "April 2026"
-];
+function MonthFilterDropdown({ month, onChange }) {
+  const now = new Date();
+  const [open, setOpen] = useState(false);
+  const [viewYear, setViewYear] = useState(now.getFullYear());
+  const [viewMonth, setViewMonth] = useState(now.getMonth());
+
+  return (
+    <div style={{ position:"relative" }}>
+      <button type="button" className="btn" style={{ minWidth:170, textAlign:"left", display:"flex", justifyContent:"space-between", alignItems:"center" }}
+        onClick={() => setOpen(v => !v)}>
+        <span>📅 {month || "All months"}</span>
+        <span style={{ color:"#a39c8a" }}>{open ? "▴" : "▾"}</span>
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position:"fixed", inset:0, zIndex:19, background:"transparent" }} />
+          <div style={{
+            position:"absolute", top:"100%", left:0, marginTop:4, zIndex:20,
+            background:"#fff", border:"1px solid var(--line)", borderRadius:12,
+            boxShadow:"0 8px 24px rgba(28,43,36,.18)", padding:12,
+          }}>
+            <MonthCalendar year={viewYear} month={viewMonth} onSelect={(y,m) => {
+              setViewYear(y); setViewMonth(m); onChange(monthLabel(y, m)); setOpen(false);
+            }} />
+            <button type="button" className="btn" style={{ width:"100%", marginTop:8, fontSize:12 }}
+              onClick={() => { onChange(""); setOpen(false); }}>
+              Clear (show all months)
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 export default function OsasStatusUpdates() {
   const [updates, setUpdates] = useState([]);
@@ -21,6 +49,7 @@ export default function OsasStatusUpdates() {
   const [isFlagged,  setIsFlagged]  = useState("");
   const [gender,     setGender]     = useState("");
   const [month,      setMonth]      = useState("");
+  const [expandedId, setExpandedId] = useState(null);
 
   useEffect(() => { load(); }, [isVerified, isFlagged, gender, month]);
 
@@ -78,10 +107,7 @@ export default function OsasStatusUpdates() {
           </div>
           <div className="field" style={{marginBottom:0}}>
             <label>Month</label>
-            <select value={month} onChange={e => setMonth(e.target.value)}>
-              <option value="">All months</option>
-              {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
+            <MonthFilterDropdown month={month} onChange={setMonth} />
           </div>
           <div className="field" style={{marginBottom:0}}>
             <label>Gender</label>
@@ -93,47 +119,14 @@ export default function OsasStatusUpdates() {
           </div>
         </div>
 
-        {/* -- Checkbox filters -- */}
-        <div style={{display:"flex",gap:16,flexWrap:"wrap",marginTop:14,paddingTop:12,borderTop:"1px solid var(--line)"}}>
-          {[
-            { label:"Verified",   state:isVerified, setter:setIsVerified, trueVal:"true",  falseVal:"false" },
-            { label:"Pending",    state:isVerified, setter:setIsVerified, trueVal:"false", falseVal:"true"  },
-            { label:"Flagged",    state:isFlagged,  setter:setIsFlagged,  trueVal:"true",  falseVal:"false" },
-          ].map(({ label, state, setter, trueVal, falseVal }) => {
-            const checked = state === trueVal;
-            return (
-              <label key={label} style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13}}>
-                <input type="checkbox" checked={checked}
-                  onChange={() => setter(checked ? "" : trueVal)}
-                  style={{width:14,height:14}} />
-                {label}
-              </label>
-            );
-          })}
-          <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13}}>
-            <input type="checkbox" checked={gender==="male"}
-              onChange={() => setGender(gender==="male" ? "" : "male")} style={{width:14,height:14}} />
-            Male
-          </label>
-          <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13}}>
-            <input type="checkbox" checked={gender==="female"}
-              onChange={() => setGender(gender==="female" ? "" : "female")} style={{width:14,height:14}} />
-            Female
-          </label>
-          {MONTHS.slice(0,3).map(m => (
-            <label key={m} style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13}}>
-              <input type="checkbox" checked={month===m}
-                onChange={() => setMonth(month===m ? "" : m)} style={{width:14,height:14}} />
-              {m}
-            </label>
-          ))}
-          {activeFilters > 0 && (
+        {activeFilters > 0 && (
+          <div style={{display:"flex",marginTop:14,paddingTop:12,borderTop:"1px solid var(--line)"}}>
             <button onClick={clearFilters} style={{
               background:"none",border:"none",color:"var(--pin)",cursor:"pointer",
               fontSize:12.5,fontFamily:"inherit",fontWeight:700,padding:0
             }}>x Clear filters ({activeFilters})</button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       <div className="card">
@@ -144,29 +137,73 @@ export default function OsasStatusUpdates() {
             <tbody>
               <tr>
                 <th>Student</th><th>Month</th><th>Status</th>
-                <th>Note</th><th></th>
+                <th>Note</th><th>Documentation</th><th></th>
               </tr>
               {displayed.map(u => (
-                <tr key={u.id}>
-                  <td>
-                    {u.student_name}
-                    <div style={{fontSize:11,color:"#a39c8a"}}>{u.student_email}</div>
-                  </td>
-                  <td>{u.month_label}</td>
-                  <td>
-                    {u.status_type==="same"       && "Same boarding house"}
-                    {u.status_type==="transferred" && `Transferred -> ${u.new_boarding_house_name||""}${u.new_barangay ? ` (${u.new_barangay})` : ""}`}
-                    {u.status_type==="moved_home"  && "Moved back home"}
-                  </td>
-                  <td style={{maxWidth:200,fontSize:12,color:"#6b6457"}}>{u.note||"-"}</td>
-                  <td>
-                    {u.is_flagged
-                      ? <span className="badge warn" title={u.flag_reason}>Flagged</span>
-                      : <button className="btn" style={{padding:"5px 10px",fontSize:11}}
-                          onClick={() => handleFlag(u.id)}>Flag</button>
-                    }
-                  </td>
-                </tr>
+                <>
+                  <tr key={u.id}>
+                    <td>
+                      {u.student_name}
+                      <div style={{fontSize:11,color:"#a39c8a"}}>{u.student_email}</div>
+                    </td>
+                    <td>{u.month_label}</td>
+                    <td>
+                      {u.status_type==="same"       && "Same boarding house"}
+                      {u.status_type==="transferred" && `Transferred -> ${u.new_boarding_house_name||""}${u.new_barangay ? ` (${u.new_barangay})` : ""}`}
+                      {u.status_type==="moved_home"  && "Moved back home"}
+                    </td>
+                    <td style={{maxWidth:200,fontSize:12,color:"#6b6457"}}>{u.note||"-"}</td>
+                    <td>
+                      {(u.photo_data_url || u.amenities_checklist) ? (
+                        <button
+                          className="btn"
+                          style={{ fontSize:11, padding:"4px 8px", display:"flex", alignItems:"center", gap:6 }}
+                          onClick={() => setExpandedId(expandedId === u.id ? null : u.id)}
+                        >
+                          {u.photo_data_url && (
+                            <img src={u.photo_data_url} alt=""
+                              style={{ width:24, height:24, objectFit:"cover", borderRadius:4, border:"1px solid var(--line)" }} />
+                          )}
+                          {u.amenities_checklist && (
+                            <span style={{ fontSize:10, color:"#6b6457" }}>
+                              {u.amenities_checklist.split(",").filter(Boolean).length} amenities
+                            </span>
+                          )}
+                          <span>{expandedId === u.id ? "Hide" : "View"}</span>
+                        </button>
+                      ) : <span style={{fontSize:11,color:"#a39c8a"}}>None</span>}
+                    </td>
+                    <td>
+                      {u.is_flagged
+                        ? <span className="badge warn" title={u.flag_reason}>Flagged</span>
+                        : <button className="btn" style={{padding:"5px 10px",fontSize:11}}
+                            onClick={() => handleFlag(u.id)}>Flag</button>
+                      }
+                    </td>
+                  </tr>
+                  {expandedId === u.id && (
+                    <tr key={`doc-${u.id}`}>
+                      <td colSpan={6} style={{background:"#faf9f5",padding:"10px 12px"}}>
+                        {u.photo_data_url && (
+                          <img src={u.photo_data_url} alt="Boarding house condition"
+                            style={{maxWidth:280,borderRadius:8,border:"1px solid var(--line)"}} />
+                        )}
+                        {u.amenities_checklist && (
+                          <div style={{marginTop: u.photo_data_url ? 10 : 0}}>
+                            <strong style={{fontSize:12.5, color:"#3a352b"}}>Amenities present:</strong>
+                            <div style={{display:"flex", flexWrap:"wrap", gap:6, marginTop:6}}>
+                              {u.amenities_checklist.split(",").filter(Boolean).map((a, i) => (
+                                <span key={i} className="badge" style={{background:"#eef3ee", color:"#2f5d4f"}}>
+                                  {a.trim()}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </>
               ))}
             </tbody>
           </table>

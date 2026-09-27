@@ -4,9 +4,9 @@ import { api } from "../api/client";
 const AuthContext = createContext();
 
 function getPrefix() {
-  return window.location.pathname.startsWith("/osas")
-    ? "osas"
-    : "student";
+  if (window.location.pathname.startsWith("/osas")) return "osas";
+  if (window.location.pathname.startsWith("/barangay")) return "barangay";
+  return "student";
 }
 
 function getStoredName() {

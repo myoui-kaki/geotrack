@@ -3,7 +3,8 @@ main.py — GeoTrack API v3
 Features: 2FA, OTP email verification, audit logs, session timeout,
           account lockout, password policy, charts data, export endpoints.
 """
-import os, secrets, random, string
+import os, secrets, random, string, re, base64
+import requests
 from datetime import datetime, timedelta
 from typing import List, Optional
 from io import BytesIO
@@ -21,7 +22,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 import models, schemas
 from database import engine, get_db, Base, SessionLocal
-from auth import hash_password, verify_password, create_access_token, require_student, require_osas_admin
+from auth import hash_password, verify_password, create_access_token, require_student, require_osas_admin, require_barangay, get_current_user
 import email_utils
 from models import (
     User,
@@ -52,6 +53,20 @@ ALLOWED_ORIGINS = [o.strip() for o in _origins_env.split(",") if o.strip()] or [
 ]
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+# Without this, an unhandled exception in a route bypasses CORSMiddleware
+# entirely (it re-raises straight up to Starlette's outer error handler),
+# so the browser never sees an Access-Control-Allow-Origin header on that
+# response and reports it as a generic "Failed to fetch" instead of the
+# real error. Catching it here and returning a normal JSON response lets
+# CORSMiddleware process it like any other response.
+from fastapi.responses import JSONResponse
+import traceback
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request, exc):
+    traceback.print_exc()
+    return JSONResponse(status_code=500, content={"detail": f"Internal server error: {exc}"})
 
 def _scheduled_compliance_sweep():
     """Runs on its own DB session since it's not triggered by a request."""
@@ -227,29 +242,59 @@ def register_student(payload: schemas.RegisterStudentRequest, db: Session = Depe
                 name=payload.boarding_house_name, barangay=payload.boarding_house_barangay,
                 latitude=payload.boarding_house_latitude, longitude=payload.boarding_house_longitude,
                 is_verified=False, submitted_by=f"Student — {user.full_name}",
-                submitted_by_id=user.id)
+                submitted_by_id=user.id, contact_person=payload.landlord_name,
+                contact_number=payload.landlord_contact)
             db.add(house); db.commit(); db.refresh(house)
+        else:
+            # Auto-fill landlord info this student provided if the existing
+            # record is missing it - OSAS shouldn't have to chase down
+            # contact details separately when a student already has them.
+            updated = False
+            if payload.landlord_name and not house.contact_person:
+                house.contact_person = payload.landlord_name; updated = True
+            if payload.landlord_contact and not house.contact_number:
+                house.contact_number = payload.landlord_contact; updated = True
+            if updated:
+                db.commit()
         db.add(models.StatusUpdate(student_id=user.id, boarding_house_id=house.id,
                                    status_type="same", month_label=datetime.utcnow().strftime("%B %Y")))
         db.commit()
 
         current = datetime.utcnow()
 
-        db.add(
-            models.StudentCompliance(
-                student_id=user.id,
-                month=current.strftime("%B"),
-                year=current.year,
-                submission_status="Submitted",
-                submitted_at=current,
-                deadline=datetime(
-                    current.year,
-                    current.month,
-                    COMPLIANCE_DEADLINE_DAY
-                ),
-                remarks="Initial registration"
+        # Reuse the automation sweep's record for this month if one already
+        # exists (it runs daily and may have already created a "Pending" row
+        # for this student) instead of always inserting a new one - that was
+        # producing two rows for the same student/month in the history table.
+        existing_compliance = (
+            db.query(models.StudentCompliance)
+            .filter(
+                models.StudentCompliance.student_id == user.id,
+                models.StudentCompliance.month == current.strftime("%B"),
+                models.StudentCompliance.year == current.year,
             )
+            .first()
         )
+        if existing_compliance:
+            existing_compliance.submission_status = "Submitted"
+            existing_compliance.submitted_at = current
+            existing_compliance.remarks = "Initial registration"
+        else:
+            db.add(
+                models.StudentCompliance(
+                    student_id=user.id,
+                    month=current.strftime("%B"),
+                    year=current.year,
+                    submission_status="Submitted",
+                    submitted_at=current,
+                    deadline=datetime(
+                        current.year,
+                        current.month,
+                        COMPLIANCE_DEADLINE_DAY
+                    ),
+                    remarks="Initial registration"
+                )
+            )
 
         db.commit()
 
@@ -413,8 +458,28 @@ def reset_password(payload: schemas.ResetPasswordRequest, db: Session = Depends(
 
 # ─── STUDENT endpoints ────────────────────────────────────────────────────────
 @app.get("/api/student/me", response_model=schemas.MyProfileOut)
-def my_profile(user: models.User = Depends(require_student)):
-    return user
+def my_profile(db: Session = Depends(get_db), user: models.User = Depends(require_student)):
+    latest = (db.query(models.StatusUpdate)
+                .filter(models.StatusUpdate.student_id == user.id)
+                .order_by(models.StatusUpdate.created_at.desc())
+                .first())
+    boarding_house_name = current_barangay = landlord_name = landlord_contact = None
+    if latest:
+        if latest.status_type == "transferred":
+            boarding_house_name = latest.new_boarding_house_name
+            current_barangay = latest.new_barangay
+        elif latest.boarding_house:
+            boarding_house_name = latest.boarding_house.name
+            current_barangay = latest.boarding_house.barangay
+            landlord_name = latest.boarding_house.contact_person
+            landlord_contact = latest.boarding_house.contact_number
+    return schemas.MyProfileOut(
+        id=user.id, full_name=user.full_name, email=user.email,
+        course_section=user.course_section, gender=user.gender,
+        created_at=user.created_at, two_fa_enabled=user.two_fa_enabled,
+        current_boarding_house=boarding_house_name, current_barangay=current_barangay,
+        landlord_name=landlord_name, landlord_contact=landlord_contact,
+    )
 
 @app.put("/api/student/me", response_model=schemas.MyProfileOut)
 def update_profile(payload: schemas.MyProfileUpdate, db: Session = Depends(get_db),
@@ -485,6 +550,24 @@ def submit_status(
             detail="new_boarding_house_name required when transferred"
         )
 
+    # A photo and amenities checklist of the boarding house are required
+    # every month the student is still reporting a boarding house ("same"
+    # or "transferred") - not required for "moved_home" since there's no
+    # boarding house to document anymore. Submission itself is blocked
+    # once-per-month further below, so this only ever fires once per month
+    # per student in practice.
+    if payload.status_type in ("same", "transferred"):
+        if not payload.photo_data_url:
+            raise HTTPException(
+                status_code=400,
+                detail="A photo of your boarding house is required for this month's update."
+            )
+        if not payload.amenities_checklist:
+            raise HTTPException(
+                status_code=400,
+                detail="Please check off the amenities available at your boarding house for this month's update."
+            )
+
     current_month = datetime.utcnow().strftime("%B")
     current_year = datetime.utcnow().year
 
@@ -536,6 +619,8 @@ def submit_status(
         new_barangay=payload.new_barangay,
         note=payload.note,
         month_label=f"{current_month} {current_year}",
+        photo_data_url=payload.photo_data_url,
+        amenities_checklist=",".join(payload.amenities_checklist) if payload.amenities_checklist else None,
     )
 
     db.add(update)
@@ -565,7 +650,11 @@ def edit_status(uid: int, payload: schemas.StatusUpdateEdit, db: Session = Depen
     u = db.get(models.StatusUpdate, uid)
     if not u: raise HTTPException(404, "Not found")
     if u.student_id != user.id: raise HTTPException(403, "Not yours")
-    for f, v in payload.dict(exclude_unset=True).items(): setattr(u, f, v)
+    data = payload.dict(exclude_unset=True)
+    if "amenities_checklist" in data:
+        checklist = data.pop("amenities_checklist")
+        u.amenities_checklist = ",".join(checklist) if checklist else None
+    for f, v in data.items(): setattr(u, f, v)
     db.commit(); db.refresh(u)
     log_action(db, user, "update", "status_update", uid, u.month_label, "Status update edited")
     return u
@@ -582,10 +671,26 @@ def delete_status(uid: int, db: Session = Depends(get_db), user: models.User = D
 @app.post("/api/student/concerns", response_model=schemas.ConcernOut)
 def report_concern(payload: schemas.ConcernCreate, db: Session = Depends(get_db),
                    user: models.User = Depends(require_student)):
-    c = models.Concern(student_id=user.id, category=payload.category, details=payload.details)
+    amenities_str = ",".join(payload.amenities_checklist) if payload.amenities_checklist else None
+    c = models.Concern(
+        student_id=user.id, category=payload.category, details=payload.details,
+        photo_data_url=payload.photo_data_url, amenities_checklist=amenities_str,
+    )
     db.add(c); db.commit(); db.refresh(c)
     log_action(db, user, "create", "concern", c.id, payload.category, payload.details[:80])
     return c
+
+@app.get("/api/student/concerns", response_model=List[schemas.ConcernOut])
+def my_concerns(db: Session = Depends(get_db), user: models.User = Depends(require_student)):
+    # A student could only ever submit concerns, never see them again once
+    # sent - so there was no way to check whether OSAS had actually looked
+    # at an old report. This lists the student's own concerns, new and
+    # past, newest first - the same pattern already used for their SOS
+    # history.
+    return (db.query(models.Concern)
+              .filter(models.Concern.student_id == user.id)
+              .order_by(models.Concern.created_at.desc())
+              .all())
 
 @app.get("/api/student/my-boarding-house", response_model=Optional[schemas.BoardingHouseOut])
 def my_boarding_house(db: Session = Depends(get_db), user: models.User = Depends(require_student)):
@@ -596,7 +701,46 @@ def my_boarding_house(db: Session = Depends(get_db), user: models.User = Depends
     return u.boarding_house if u else None
 
 
+# ─── Cross-portal contact directory ───────────────────────────────────────────
+# Lets Student/OSAS/Barangay each see the others' published contact info
+# (e.g. Student's SOS page shows the actual barangay chairman + OSAS
+# officer numbers here, instead of a fixed placeholder). Any authenticated
+# role can read it - it's not scoped to one portal.
+
+@app.get("/api/contacts/directory", response_model=schemas.ContactDirectoryOut)
+def contacts_directory(db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
+    barangay_users = (db.query(models.User)
+                         .filter(models.User.role == "barangay", models.User.archived_at.is_(None))
+                         .all())
+    osas_users = (db.query(models.User)
+                     .filter(models.User.role == "osas_admin", models.User.archived_at.is_(None))
+                     .all())
+    return schemas.ContactDirectoryOut(
+        barangay_contacts=[
+            schemas.ContactDirectoryEntry(
+                full_name=u.full_name, role_label=u.barangay_name, contact_number=u.contact_number
+            ) for u in barangay_users
+        ],
+        osas_contacts=[
+            schemas.ContactDirectoryEntry(
+                full_name=u.full_name, role_label=u.position, contact_number=u.contact_number
+            ) for u in osas_users
+        ],
+    )
+
+
 # ─── OSAS endpoints ───────────────────────────────────────────────────────────
+
+@app.get("/api/osas/me", response_model=schemas.OsasProfileOut)
+def osas_profile(user: models.User = Depends(require_osas_admin)):
+    return user
+
+@app.patch("/api/osas/me", response_model=schemas.OsasProfileOut)
+def osas_update_profile(payload: schemas.OsasProfileUpdate, db: Session = Depends(get_db),
+                         user: models.User = Depends(require_osas_admin)):
+    for f, v in payload.dict(exclude_unset=True).items(): setattr(user, f, v)
+    db.commit(); db.refresh(user)
+    return user
 
 EMERGENCY_CATEGORIES = ["Medical Emergency", "Safety Threat", "Fire", "Natural Disaster", "Other"]
 
@@ -637,6 +781,20 @@ def trigger_sos(payload: schemas.SOSCreate, db: Session = Depends(get_db),
         email_utils.notify_emergency_alert(admin.email, payload.category, user.full_name, payload.details)
     notify_all(db, [a.id for a in osas_admins], "sos_alert", f"SOS: {payload.category}",
                f"{user.full_name} triggered an SOS alert ({payload.category}).")
+
+    # Also alert the barangay account for wherever the student currently
+    # boards (if any) - both OSAS and the barangay should know at the same
+    # time, not just OSAS.
+    current_barangay = _student_current_barangay(db, user.id)
+    if current_barangay:
+        barangay_accounts = (db.query(models.User)
+                               .filter(models.User.role == "barangay",
+                                       models.User.barangay_name == current_barangay)
+                               .all())
+        if barangay_accounts:
+            notify_all(db, [b.id for b in barangay_accounts], "sos_alert", f"SOS: {payload.category}",
+                       f"{user.full_name} (in {current_barangay}) triggered an SOS alert ({payload.category}).")
+
     db.refresh(case)
     return _emergency_out(case)
 
@@ -810,6 +968,7 @@ def all_status_updates(
             new_boarding_house_name=u.new_boarding_house_name, new_barangay=u.new_barangay,
             note=u.note, month_label=u.month_label, is_flagged=u.is_flagged,
             flag_reason=u.flag_reason, created_at=u.created_at,
+            photo_data_url=u.photo_data_url, amenities_checklist=u.amenities_checklist,
             student_name=u.student.full_name, student_email=u.student.email,
         ))
     return results
@@ -853,6 +1012,8 @@ def list_bh(db: Session = Depends(get_db), user: models.User = Depends(require_o
 def verify_bh(hid: int, db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
     h = db.query(models.BoardingHouse).get(hid)
     if not h: raise HTTPException(404, "Not found")
+    if h.barangay not in PARTICIPATING_BARANGAYS:
+        raise HTTPException(400, f"{h.barangay} does not yet participate in barangay permit verification, so this boarding house cannot be marked verified. Coordinate with that barangay first.")
     h.is_verified = True; db.commit(); db.refresh(h)
     log_action(db, user, "verify", "boarding_house", hid, h.name, "Boarding house verified")
     if h.submitter:
@@ -892,6 +1053,94 @@ def delete_bh(hid: int, db: Session = Depends(get_db), user: models.User = Depen
     db.delete(h); db.commit()
     return {"message": "Deleted"}
 
+
+# ─── Barangay account ─────────────────────────────────────────────────────────
+# A barangay account only ever sees data scoped to its own barangay
+# (user.barangay_name) - boarding houses located there, and emergency/
+# concern cases from students whose current boarding house is there.
+
+@app.get("/api/barangay/me", response_model=schemas.BarangayProfileOut)
+def barangay_profile(user: models.User = Depends(require_barangay)):
+    return user
+
+@app.patch("/api/barangay/me", response_model=schemas.BarangayProfileOut)
+def barangay_update_profile(payload: schemas.BarangayProfileUpdate, db: Session = Depends(get_db),
+                             user: models.User = Depends(require_barangay)):
+    for f, v in payload.dict(exclude_unset=True).items(): setattr(user, f, v)
+    db.commit(); db.refresh(user)
+    return user
+
+@app.get("/api/barangay/boarding-houses", response_model=List[schemas.BoardingHouseOut])
+def barangay_list_bh(db: Session = Depends(get_db), user: models.User = Depends(require_barangay)):
+    return (db.query(models.BoardingHouse)
+              .filter(models.BoardingHouse.barangay == user.barangay_name)
+              .all())
+
+@app.patch("/api/barangay/boarding-houses/{hid}/permit", response_model=schemas.BoardingHouseOut)
+def barangay_confirm_permit(hid: int, payload: schemas.BarangayPermitUpdate,
+                             db: Session = Depends(get_db), user: models.User = Depends(require_barangay)):
+    h = db.query(models.BoardingHouse).get(hid)
+    if not h: raise HTTPException(404, "Not found")
+    if h.barangay != user.barangay_name:
+        raise HTTPException(403, "This boarding house is outside your barangay.")
+    h.has_barangay_permit = payload.has_barangay_permit
+    # The barangay's own permit confirmation is what actually grants
+    # "verified" status - OSAS's verify button (above) requires this to
+    # already be true for a participating barangay.
+    h.is_verified = bool(payload.has_barangay_permit)
+    db.commit(); db.refresh(h)
+    log_action(db, user, "verify" if payload.has_barangay_permit else "reject", "boarding_house", hid, h.name,
+               "Barangay confirmed business permit" if payload.has_barangay_permit else "Barangay could not confirm a valid permit")
+    if h.submitter:
+        if payload.has_barangay_permit:
+            notify(db, h.submitter.id, "approval", "Boarding house verified",
+                   f"{user.barangay_name} confirmed a valid permit for \"{h.name}\".")
+        else:
+            notify(db, h.submitter.id, "rejection", "Boarding house not verified",
+                   f"{user.barangay_name} could not confirm a valid permit for \"{h.name}\".")
+    return h
+
+@app.get("/api/barangay/geo-map", response_model=List[schemas.StudentMapPoint])
+def barangay_geo_map(db: Session = Depends(get_db), user: models.User = Depends(require_barangay)):
+    """Same idea as OSAS's /api/osas/geo-map, but scoped to only the
+    students currently boarding within this barangay account's own
+    barangay - so a barangay can see exactly where its residents are
+    dorming, the same way OSAS can see everyone."""
+    points = []
+    for s in db.query(models.User).filter(models.User.role == "student").all():
+        u = (db.query(models.StatusUpdate)
+             .filter(models.StatusUpdate.student_id == s.id,
+                     models.StatusUpdate.boarding_house_id.isnot(None))
+             .order_by(models.StatusUpdate.created_at.desc()).first())
+        if not u or not u.boarding_house: continue
+        h = u.boarding_house
+        if h.latitude is None: continue
+        if h.barangay != user.barangay_name: continue
+        points.append(schemas.StudentMapPoint(student_name=s.full_name, boarding_house_name=h.name,
+                                              barangay=h.barangay, latitude=h.latitude,
+                                              longitude=h.longitude, is_flagged=u.is_flagged))
+    return points
+
+@app.get("/api/barangay/emergencies", response_model=List[schemas.EmergencyCaseOut])
+def barangay_emergencies(db: Session = Depends(get_db), user: models.User = Depends(require_barangay)):
+    cases = (db.query(models.EmergencyCase)
+               .order_by(models.EmergencyCase.created_at.desc())
+               .all())
+    return [_emergency_out(c) for c in cases
+            if _student_current_barangay(db, c.student_id) == user.barangay_name]
+
+@app.get("/api/barangay/concerns", response_model=List[schemas.ConcernAdminOut])
+def barangay_concerns(db: Session = Depends(get_db), user: models.User = Depends(require_barangay)):
+    concerns = db.query(models.Concern).order_by(models.Concern.created_at.desc()).all()
+    return [schemas.ConcernAdminOut(
+                id=c.id, category=c.category, details=c.details, status=c.status,
+                created_at=c.created_at, photo_data_url=c.photo_data_url,
+                amenities_checklist=c.amenities_checklist,
+                student_name=c.student.full_name if c.student else "Unknown",
+                student_email=c.student.email if c.student else "",
+            ) for c in concerns
+            if _student_current_barangay(db, c.student_id) == user.barangay_name]
+
 @app.get("/api/osas/boarding-houses/{hid}/reviews", response_model=List[schemas.ReviewOut])
 def bh_reviews(hid: int, db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
     if not db.query(models.BoardingHouse).get(hid): raise HTTPException(404, "Not found")
@@ -901,6 +1150,7 @@ def bh_reviews(hid: int, db: Session = Depends(get_db), user: models.User = Depe
 def all_concerns(db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
     return [schemas.ConcernAdminOut(id=c.id, category=c.category, details=c.details,
                                     status=c.status, created_at=c.created_at,
+                                    photo_data_url=c.photo_data_url, amenities_checklist=c.amenities_checklist,
                                     student_name=c.student.full_name, student_email=c.student.email)
             for c in db.query(models.Concern).order_by(models.Concern.created_at.desc()).all()]
 
@@ -1086,28 +1336,92 @@ def get_audit_logs(
 
 
 # ─── TALLY / EXPORT ───────────────────────────────────────────────────────────
+# Barangays that currently participate in the permit-verification workflow.
+# A boarding house outside these barangays can never be marked verified,
+# regardless of what OSAS or a student submits.
+PARTICIPATING_BARANGAYS = {"Brgy. Del Remedio"}
+
+def _student_current_barangay(db, student_id: int) -> Optional[str]:
+    """A student's most recently known boarding house barangay, or None."""
+    u = (db.query(models.StatusUpdate)
+           .filter(models.StatusUpdate.student_id == student_id)
+           .order_by(models.StatusUpdate.created_at.desc(), models.StatusUpdate.id.desc())
+           .first())
+    if not u: return None
+    if u.status_type == "transferred": return u.new_barangay
+    if u.boarding_house: return u.boarding_house.barangay
+    return None
+
+# Course code (the letters at the start of course_section, e.g. "BSIT-3A" -> "BSIT")
+# to college/department. Add or edit entries here as needed for your campus.
+COURSE_TO_DEPARTMENT = {
+    "BSIT": "CCS", "BSCS": "CCS", "BLIS": "CCS",
+    "BSCE": "COE", "BSEE": "COE", "BSME": "COE", "BSABE": "COE",
+    "BEED": "CTE", "BSED": "CTE", "BPED": "CTE", "BTLED": "CTE", "BECED": "CTE",
+    "BSBA": "CBA", "BSAIS": "CBA", "BSREM": "CBA", "BSA": "CBA",
+    "BSHM": "CHTM", "BSTM": "CHTM",
+    "BSCRIM": "CCJE",
+    "BAB": "CAS", "BSP": "CAS",
+}
+
+def get_department(course_section: Optional[str]) -> str:
+    if not course_section:
+        return "Not specified"
+    m = re.match(r"[A-Za-z]+", course_section.strip())
+    code = m.group(0).upper() if m else ""
+    return COURSE_TO_DEPARTMENT.get(code, "Other / Unmapped")
+
 def _compute_tally(db, group_by_list, month_label):
-    valid = {"barangay","boarding_house","gender","department","monthly_status"}
+    valid = {"barangay","boarding_house","gender","department","section","monthly_status"}
     def compute_section(g):
         groups: dict = {}
-        if g in ("gender","department"):
+        amenities_by_label: dict = {}
+        if g in ("gender","department","section"):
             for s in db.query(models.User).filter(models.User.role=="student").all():
-                label = (s.gender or "Not specified").replace("_"," ").title() if g=="gender" else (s.course_section or "Not specified")
+                if g == "gender":
+                    label = (s.gender or "Not specified").replace("_"," ").title()
+                elif g == "department":
+                    label = get_department(s.course_section)
+                else:  # section - the full course & section string, e.g. "BSIT-3A"
+                    label = s.course_section or "Not specified"
                 groups.setdefault(label,[]).append(s.full_name)
-        else:
+        elif g == "monthly_status":
+            # This one genuinely is "what did each student report this
+            # specific month" - the month filter makes sense here.
             q = db.query(models.StatusUpdate)
             if month_label: q = q.filter(models.StatusUpdate.month_label==month_label)
             for u in q.all():
                 nm = u.student.full_name if u.student else "Unknown"
-                if g=="monthly_status":
-                    label = {"same":"Same boarding house","transferred":"Transferred","moved_home":"Moved home"}.get(u.status_type,u.status_type)
-                    groups.setdefault(label,[]).append(nm); continue
+                label = {"same":"Same boarding house","transferred":"Transferred","moved_home":"Moved home"}.get(u.status_type,u.status_type)
+                groups.setdefault(label,[]).append(nm)
+        else:
+            # barangay / boarding_house - this is "where is each student
+            # currently living", so use each student's most recent status
+            # update ever, not just ones filed in the selected month. A
+            # student who hasn't had anything change since August is still
+            # living somewhere in September - filtering strictly by month
+            # here would make the report go empty for any month nobody
+            # happened to submit a fresh update in.
+            latest_by_student = {}
+            for u in (db.query(models.StatusUpdate)
+                        .order_by(models.StatusUpdate.created_at.asc(), models.StatusUpdate.id.asc())
+                        .all()):
+                latest_by_student[u.student_id] = u  # later rows overwrite earlier ones
+            for u in latest_by_student.values():
+                nm = u.student.full_name if u.student else "Unknown"
                 if u.status_type=="transferred": hn,bar = u.new_boarding_house_name or "Unknown",u.new_barangay or "Unknown"
                 elif u.boarding_house: hn,bar = u.boarding_house.name,u.boarding_house.barangay
                 else: continue
-                label = bar if g=="barangay" else hn
+                if g=="barangay": label = bar
+                else: label = f"{hn} ({bar})" if bar and bar != "Unknown" else hn
                 groups.setdefault(label,[]).append(nm)
-        rows = [schemas.TallyReportRow(group_label=k,count=len(v),student_names=sorted(v)) for k,v in sorted(groups.items())]
+                if g=="boarding_house" and u.amenities_checklist:
+                    amenities_by_label.setdefault(label,set()).update(
+                        a.strip() for a in u.amenities_checklist.split(",") if a.strip())
+        rows = [schemas.TallyReportRow(
+                    group_label=k, count=len(v), student_names=sorted(v),
+                    amenities=", ".join(sorted(amenities_by_label[k])) if amenities_by_label.get(k) else None,
+                ) for k,v in sorted(groups.items())]
         return schemas.TallyReportSection(group_by=g,rows=rows,total=sum(len(v) for v in groups.values()))
     sections = [compute_section(g) for g in group_by_list if g in valid]
     return sections
@@ -1120,6 +1434,398 @@ def tally_report(group_by: str, month_label: Optional[str] = None,
     return schemas.TallyReportOut(group_by=",".join(requested), month_label=month_label,
                                   sections=sections, rows=sections[0].rows if sections else [],
                                   total=sections[0].total if len(sections)==1 else sum(s.total for s in sections))
+
+def _fill_narrative_template(sections, month_label) -> str:
+    """Step 1 of the report pipeline: fill a fixed narrative-report template
+    with the ACTUAL tally numbers, deterministically - no AI involved. This
+    guarantees every figure that ends up in the final report is real. Step 2
+    (in _build_narrative) hands this filled template to the AI and asks it
+    only to refine the wording/flow, not to invent or recompute numbers."""
+    total_students = sum(sec.total for sec in sections if sec.rows)
+    findings = []
+    for sec in sections:
+        label = SECTION_LABELS_BACKEND.get(sec.group_by, sec.group_by)
+        if not sec.rows:
+            findings.append(f"- {label}: no data on file for this period.")
+            continue
+        top = max(sec.rows, key=lambda r: r.count)
+        line = (f"- {label}: {sec.total} student(s) across {len(sec.rows)} "
+                f"categor{'y' if len(sec.rows)==1 else 'ies'}; largest group is "
+                f"\"{top.group_label}\" with {top.count} student(s).")
+        amenity_rows = [r for r in sec.rows if r.amenities]
+        if amenity_rows:
+            line += " Amenities on file: " + "; ".join(f"{r.group_label} - {r.amenities}" for r in amenity_rows)
+        findings.append(line)
+
+    return (
+        f"Report Title: Student Boarding House Monitoring Report\n"
+        f"Report period: {month_label or 'All time'}\n\n"
+        f"Introduction: This report presents the monitoring data gathered from LSPU-SPCC student "
+        f"boarders' monthly check-ins for the stated period, covering {total_students} student "
+        f"record(s) in total.\n\n"
+        f"Key Findings:\n" + "\n".join(findings) + "\n\n"
+        f"Conclusion: The figures above reflect the current state of off-campus student housing "
+        f"monitoring for this period and are intended to support OSAS's continuing oversight of "
+        f"student welfare in these boarding houses."
+    )
+
+SECTION_LABELS_BACKEND = {
+    "barangay": "Barangay", "boarding_house": "Boarding house", "gender": "Gender",
+    "department": "Department", "section": "Section", "monthly_status": "Monthly status",
+}
+
+def _gather_report_photos(db, limit: int = 6):
+    """Pulls actual student-submitted boarding-house photos - from monthly
+    status update documentation AND from concern reports - to reference as
+    the report's figures. This project has no separate photo library, so
+    the figures shown here are whatever students have genuinely submitted
+    so far. Most recent first across both sources, capped to keep the
+    report a reasonable length."""
+    updates = (db.query(models.StatusUpdate)
+                 .filter(models.StatusUpdate.photo_data_url.isnot(None))
+                 .order_by(models.StatusUpdate.created_at.desc())
+                 .limit(limit)
+                 .all())
+    concerns = (db.query(models.Concern)
+                  .filter(models.Concern.photo_data_url.isnot(None))
+                  .order_by(models.Concern.created_at.desc())
+                  .limit(limit)
+                  .all())
+
+    entries = []
+    for u in updates:
+        student_name = u.student.full_name if u.student else "A student"
+        if u.status_type == "transferred":
+            house_label = u.new_boarding_house_name or "their new boarding house"
+            barangay = u.new_barangay
+        elif u.boarding_house:
+            house_label = u.boarding_house.name
+            barangay = u.boarding_house.barangay
+        else:
+            house_label, barangay = "their boarding house", None
+        where = f"{house_label}, {barangay}" if barangay else house_label
+        entries.append((u.created_at, u.photo_data_url,
+                         f"{student_name}'s boarding house condition at {where}, submitted {u.month_label} (monthly status update)."))
+    for c in concerns:
+        student_name = c.student.full_name if c.student else "A student"
+        entries.append((c.created_at, c.photo_data_url,
+                         f"Photo submitted by {student_name} with a '{c.category}' concern report."))
+
+    entries.sort(key=lambda e: e[0], reverse=True)
+    photos = []
+    for i, (_, photo_data_url, note) in enumerate(entries[:limit], start=1):
+        photos.append(schemas.NarrativeReportPhoto(photo_data_url=photo_data_url, caption=f"Figure {i}. {note}"))
+    return photos
+
+def _call_gemini(prompt: str) -> Optional[str]:
+    """Tries Gemini first if GEMINI_API_KEY is configured. Returns None on
+    any failure so the caller can fall back to Claude or the templated
+    summary instead of breaking the report."""
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return None
+    model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    try:
+        resp = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+            headers={"x-goog-api-key": api_key, "content-type": "application/json"},
+            json={"contents": [{"parts": [{"text": prompt}]}]},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        candidates = resp.json().get("candidates", [])
+        if not candidates:
+            return None
+        parts = candidates[0].get("content", {}).get("parts", [])
+        text = "".join(p.get("text", "") for p in parts).strip()
+        return text or None
+    except Exception:
+        return None
+ 
+def _call_claude(prompt: str) -> Optional[str]:
+    """Used only if GEMINI_API_KEY isn't set but ANTHROPIC_API_KEY is -
+    keeps the Claude path working for anyone who already had it configured."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return None
+    try:
+        resp = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 900,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=20,
+        )
+        resp.raise_for_status()
+        content = resp.json().get("content", [])
+        text = "".join(block.get("text", "") for block in content if block.get("type") == "text").strip()
+        return text or None
+    except Exception:
+        return None
+ 
+def _build_narrative(db, group_by_list, month_label, admin_note: Optional[str] = None):
+    """Shared logic for both the JSON narrative endpoint and the .docx
+    download. Two-step pipeline, same idea as filling a template and then
+    asking an AI to polish it:
+      1. Deterministically fill a fixed report template with the real tally
+         numbers (_fill_narrative_template) - guarantees every figure is
+         accurate, no AI involved yet.
+      2. Hand that filled template to Gemini (or Claude as a fallback) and
+         ask it to rewrite it in flowing narrative-report prose, WITHOUT
+         changing any of the numbers/names it was given.
+    If neither AI provider is configured or both fail, the filled template
+    itself (a plain but accurate summary) is returned instead."""
+    sections = _compute_tally(db, group_by_list, month_label)
+    photos = _gather_report_photos(db)
+    filled_template = _fill_narrative_template(sections, month_label)
+
+    photo_note = (
+        f" {len(photos)} student-submitted boarding house photo(s) are attached as figures to this report - "
+        "refer to them as documentation rather than describing their visual contents, since you have not "
+        "actually seen them." if photos else ""
+    )
+
+    prompt = (
+        "You are refining a draft narrative report for a university student-affairs office (OSAS) "
+        "boarding house monitoring program. Below is a filled-in draft, built directly from the "
+        "system's real data. Rewrite it as 4-7 flowing, plain-language paragraphs in the same formal "
+        "register and structure as an official narrative report submitted to a director (an opening "
+        "paragraph on the monitoring effort's purpose, a paragraph on how the data was gathered from "
+        "students' monthly check-ins, then paragraphs presenting the findings, and a closing paragraph "
+        "on what this means for student welfare going forward).\n\n"
+        "IMPORTANT: every number, name, and amenity in the draft below is real - do not change, drop, "
+        "recompute, or round any of them, and do not invent any name, date, or event that isn't in the "
+        "draft. Your job is only to improve the clarity, flow, and tone - not the facts. "
+        "Do not use markdown formatting." + photo_note
+        + (f"\n\nThe OSAS admin preparing this report also asked you to keep this in mind: {admin_note.strip()}"
+           if admin_note and admin_note.strip() else "") + "\n\n"
+        f"Draft:\n{filled_template}"
+    )
+
+    text = _call_gemini(prompt)
+    generated_by = "gemini"
+    if not text:
+        text = _call_claude(prompt)
+        generated_by = "claude"
+    if not text:
+        return {"narrative": filled_template, "generated_by": "summary", "photos": photos}
+    return {"narrative": text, "generated_by": generated_by, "photos": photos}
+ 
+
+@app.get("/api/osas/reports/narrative", response_model=schemas.NarrativeReportOut)
+def narrative_report(group_by: str, month_label: Optional[str] = None, admin_note: Optional[str] = None,
+                     db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
+    requested = [g.strip() for g in group_by.split(",") if g.strip()]
+    result = _build_narrative(db, requested, month_label, admin_note)
+    return schemas.NarrativeReportOut(**result)
+
+def _parse_ai_json(text: str):
+    """Best-effort parse of a {"reply":..., "narrative":...} JSON blob the
+    AI was asked to return - strips markdown code fences if present, and
+    tolerates the model wrapping the JSON in a little extra prose."""
+    import json
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:]
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start != -1 and end != -1:
+        cleaned = cleaned[start:end+1]
+    try:
+        data = json.loads(cleaned)
+        return data.get("reply", "").strip(), data.get("narrative", "").strip()
+    except Exception:
+        return None, None
+
+@app.post("/api/osas/reports/narrative/chat", response_model=schemas.NarrativeChatOut)
+def narrative_chat(payload: schemas.NarrativeChatIn,
+                   db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
+    """Lets an OSAS admin keep talking to the AI to revise a narrative
+    report already on screen - add a point, remove a paragraph, change the
+    tone, etc. - the same way they'd chat with Gemini directly."""
+    requested = [g.strip() for g in payload.group_by.split(",") if g.strip()]
+    sections = _compute_tally(db, requested, payload.month_label)
+    data_summary = "\n".join(
+        f"{SECTION_LABELS_BACKEND.get(sec.group_by, sec.group_by)} (total {sec.total}): "
+        + ", ".join(f"{r.group_label}={r.count}" + (f" [amenities on file: {r.amenities}]" if r.amenities else "") for r in sec.rows)
+        for sec in sections
+    ) or "No data."
+
+    convo = "\n".join(f"{m.role.upper()}: {m.text}" for m in payload.messages[-8:])
+
+    prompt = (
+        "You are an AI assistant (acting as Gemini) helping an OSAS staff member revise a "
+        "student boarding-house narrative report inside their reporting tool. Here is the tally "
+        f"data behind the report:\n{data_summary}\n\n"
+        f"Here is the current draft of the narrative report:\n\"\"\"\n{payload.narrative}\n\"\"\"\n\n"
+        f"Recent conversation so far:\n{convo}\n\n"
+        "Follow the OSAS staff member's latest request and produce a revised narrative. Keep the "
+        "same formal narrative-report register (like an official report to a director). Only state "
+        "facts supported by the tally data or by what the staff member explicitly tells you to add "
+        "- do not invent names, dates, or events. If they ask you to add something you have no data "
+        "for (like a specific date or person's name), leave a bracketed placeholder like "
+        "[insert date here] rather than making one up.\n\n"
+        "Respond with ONLY a JSON object, no markdown fences, no extra text, in exactly this shape:\n"
+        '{"reply": "one short sentence telling the staff member what you changed", '
+        '"narrative": "the full revised narrative report text"}'
+    )
+
+    text = _call_gemini(prompt)
+    generated_by = "gemini"
+    if not text:
+        text = _call_claude(prompt)
+        generated_by = "claude"
+    reply, narrative = (None, None)
+    if text:
+        reply, narrative = _parse_ai_json(text)
+    if not narrative:
+        return schemas.NarrativeChatOut(
+            reply="Sorry, I couldn't reach the AI service just now - your draft is unchanged. "
+                  "Try again in a moment.",
+            narrative=payload.narrative,
+            generated_by="summary",
+        )
+    return schemas.NarrativeChatOut(reply=reply or "Updated the draft.", narrative=narrative, generated_by=generated_by)
+
+@app.get("/api/osas/reports/narrative/download")
+def narrative_report_download(group_by: str, month_label: Optional[str] = None, admin_note: Optional[str] = None,
+                              db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
+    requested = [g.strip() for g in group_by.split(",") if g.strip()]
+    result = _build_narrative(db, requested, month_label, admin_note)
+    return _render_narrative_docx(result["narrative"], result["generated_by"], result["photos"], month_label)
+
+@app.post("/api/osas/reports/narrative/download")
+def narrative_report_download_custom(payload: schemas.NarrativeChatIn,
+                                     db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
+    """Same .docx as the GET version, but uses the exact narrative text the
+    OSAS admin has on screen (including any AI-chat edits) instead of
+    re-generating it from scratch, so a chatted revision isn't lost on
+    download."""
+    photos = _gather_report_photos(db)
+    return _render_narrative_docx(payload.narrative, "custom", photos, payload.month_label)
+
+def _decode_photo_data_url(data_url: Optional[str]):
+    """Turns a 'data:image/jpeg;base64,...' string (how photos are stored
+    everywhere in this app) into an in-memory file python-docx can embed
+    with add_picture. Returns None on anything malformed so callers can
+    fall back to a text placeholder instead of failing the whole report."""
+    if not data_url or "," not in data_url:
+        return None
+    try:
+        header, encoded = data_url.split(",", 1)
+        return BytesIO(base64.b64decode(encoded))
+    except Exception:
+        return None
+
+def _render_narrative_docx(narrative_text, generated_by, photos, month_label):
+    from docx import Document
+    from docx.shared import Pt, Inches
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    doc = Document()
+
+    header_lines = [
+        ("Republic of the Philippines", False),
+        ("Laguna State Polytechnic University", True),
+        ("Province of Laguna", False),
+    ]
+    for text, bold in header_lines:
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = p.add_run(text)
+        r.bold = bold
+
+    office = doc.add_paragraph()
+    office.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    office_run = office.add_run("Office of the Student Affairs and Services (OSAS)")
+    office_run.bold = True
+
+    doc.add_paragraph()
+    sub = doc.add_paragraph("Student Housing and Residential Services")
+
+    title = doc.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title_run = title.add_run("NARRATIVE REPORT")
+    title_run.bold = True
+
+    period = doc.add_paragraph()
+    period.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    period_run = period.add_run(f"Report period: {month_label or 'All time'}")
+    period_run.italic = True
+    doc.add_paragraph()  # spacer
+
+    for para in narrative_text.split("\n"):
+        para = para.strip()
+        if not para:
+            continue
+        p = doc.add_paragraph(para)
+        p.paragraph_format.first_line_indent = Inches(0.4)
+        p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+
+    if generated_by == "summary":
+        note = doc.add_paragraph()
+        note_run = note.add_run(
+            "(This narrative is a templated summary of the tally data - AI generation was not "
+            "configured for this report. Feel free to edit this section directly.)"
+        )
+        note_run.italic = True
+
+    # Actually embed each submitted photo as a real picture in the .docx -
+    # not just a "(Insert photo here)" placeholder - so the report is
+    # ready to show as-is (e.g. to a thesis panel) without OSAS having to
+    # manually paste images in afterward.
+    doc.add_paragraph()
+    if photos:
+        any_embedded = False
+        for p in photos:
+            img_stream = _decode_photo_data_url(p.photo_data_url)
+            pic_para = doc.add_paragraph()
+            pic_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            if img_stream:
+                try:
+                    pic_para.add_run().add_picture(img_stream, width=Inches(4))
+                    any_embedded = True
+                except Exception:
+                    run = pic_para.add_run("(Photo could not be embedded)")
+                    run.italic = True
+            else:
+                run = pic_para.add_run("(Insert photo here)")
+                run.italic = True
+            cap = doc.add_paragraph()
+            cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            cap_run = cap.add_run(p.caption)
+            cap_run.italic = True
+            doc.add_paragraph()
+    else:
+        placeholder = doc.add_paragraph()
+        placeholder.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        placeholder_run = placeholder.add_run("(Insert photo here)")
+        placeholder_run.italic = True
+        cap = doc.add_paragraph()
+        cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        cap_run = cap.add_run("Figure 1. Site visitation / boarding house documentation.")
+        cap_run.italic = True
+
+    doc.add_paragraph()
+    doc.add_paragraph("Prepared by: _______________________")
+    doc.add_paragraph("Submitted to: _______________________, OSAS Director")
+
+    buf = BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": "attachment; filename=GeoTrack_Narrative_Report.docx"},
+    )
 
 @app.get("/api/osas/reports/export/csv")
 def export_csv(group_by: str, month_label: Optional[str] = None,
@@ -1173,30 +1879,45 @@ def export_pdf(group_by: str, month_label: Optional[str] = None,
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer
     from reportlab.lib import colors
+    from xml.sax.saxutils import escape as _esc
     requested = [g.strip() for g in group_by.split(",") if g.strip()]
     sections  = _compute_tally(db, requested, month_label)
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=36, bottomMargin=36)
     styles = getSampleStyleSheet()
+    # Plain strings in a reportlab Table are drawn at a fixed width and
+    # never wrap - a group label longer than its column (e.g. a boarding
+    # house name with its barangay in parentheses) just overflows into the
+    # next column instead of dropping to a second line. Wrapping every
+    # cell in a Paragraph makes the table actually word-wrap within the
+    # column widths below, same as the header/body text elsewhere.
+    cell_style = ParagraphStyle("cell", parent=styles["Normal"], fontSize=9, leading=12)
+    header_style = ParagraphStyle("cellHeader", parent=cell_style, textColor=colors.white, fontName="Helvetica-Bold")
+    bold_cell_style = ParagraphStyle("cellBold", parent=cell_style, fontName="Helvetica-Bold")
+
+    def cell(text, style=cell_style):
+        return Paragraph(_esc(str(text)).replace("\n", "<br/>"), style)
+
     story = [Paragraph("GeoTrack Tally Report", styles["Title"]),
              Paragraph(f"Month: {month_label or 'All months'} | Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC", styles["Normal"]),
              Spacer(1, 16)]
     for sec in sections:
         story.append(Paragraph(f"Group by: {sec.group_by}", styles["Heading2"]))
-        data = [["Group", "Count", "Students"]]
+        data = [[cell("Group", header_style), cell("Count", header_style), cell("Students", header_style)]]
         for row in sec.rows:
-            data.append([row.group_label, str(row.count), "\n".join(row.student_names)])
-        data.append(["Total", str(sec.total), ""])
-        t = Table(data, colWidths=[130, 50, 320])
+            data.append([cell(row.group_label), cell(row.count), cell("\n".join(row.student_names))])
+        data.append([cell("Total", bold_cell_style), cell(sec.total, bold_cell_style), cell("")])
+        t = Table(data, colWidths=[150, 50, 300])
         t.setStyle(TableStyle([
             ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#203f36")),
             ("TEXTCOLOR",  (0,0), (-1,0), colors.white),
-            ("FONTNAME",   (0,0), (-1,0), "Helvetica-Bold"),
             ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#f6f4ee")]),
-            ("FONTNAME",   (0,-1), (-1,-1), "Helvetica-Bold"),
             ("GRID",       (0,0), (-1,-1), 0.5, colors.HexColor("#d9d3c4")),
-            ("FONTSIZE",   (0,0), (-1,-1), 9),
             ("VALIGN",     (0,0), (-1,-1), "TOP"),
+            ("LEFTPADDING",  (0,0), (-1,-1), 6),
+            ("RIGHTPADDING", (0,0), (-1,-1), 6),
+            ("TOPPADDING",   (0,0), (-1,-1), 5),
+            ("BOTTOMPADDING",(0,0), (-1,-1), 5),
         ]))
         story += [t, Spacer(1, 16)]
     doc.build(story)
@@ -1402,6 +2123,21 @@ def compliance_history(
         models.StudentCompliance.id.desc()
     ).all()
 
+    # Keep one row per student per month/year - if duplicates exist (from
+    # older data), prefer a "Submitted" record over a "Pending"/"Missed" one,
+    # otherwise keep the most recent (highest id, already first since the
+    # query above is ordered id.desc()).
+    STATUS_RANK = {"Submitted": 0, "Missed": 1, "Pending": 2}
+    deduped: dict = {}
+    for record in records:
+        key = (record.student_id, record.month, record.year)
+        current = deduped.get(key)
+        if current is None:
+            deduped[key] = record
+        elif STATUS_RANK.get(record.submission_status, 9) < STATUS_RANK.get(current.submission_status, 9):
+            deduped[key] = record
+    records = sorted(deduped.values(), key=lambda r: (-r.year, -r.id))
+
     results = []
 
     for record in records:
@@ -1591,10 +2327,22 @@ def run_compliance_automation(db: Session, actor: Optional[models.User] = None):
         models.StudentCompliance.submission_status == "Pending"
     ).all()
     missed_count = 0
+    osas_admins = db.query(models.User).filter(models.User.role == "osas_admin").all()
+    osas_admin_ids = [a.id for a in osas_admins]
     for compliance in compliances:
         if compliance.deadline and now > compliance.deadline:
             compliance.submission_status = "Missed"
             compliance.remarks = "Submission deadline missed"
+            # OSAS should be told a specific student still needs to submit
+            # their monthly status update, not just find out later once the
+            # student gets flagged after 3 misses.
+            student = db.query(models.User).get(compliance.student_id)
+            if osas_admin_ids:
+                notify_all(db, osas_admin_ids, "compliance_missed",
+                           "Student needs to update their status",
+                           f"{student.full_name if student else 'A student'} missed the monthly "
+                           f"status update deadline ({compliance.month} {compliance.year}) and still "
+                           f"needs to check in.")
             flag = db.query(models.StudentFlag).filter(
                 models.StudentFlag.student_id == compliance.student_id).first()
             if not flag:

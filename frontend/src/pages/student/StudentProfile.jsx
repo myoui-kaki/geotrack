@@ -57,22 +57,51 @@ export default function StudentProfile() {
 
         {loading ? <div className="loading-text">Loading...</div>
         : !editing ? (
+          !profile ? (
+            <div className="card">
+              <div className="review-empty">Couldn't load your profile. Try refreshing the page.</div>
+            </div>
+          ) : (
           <div className="card">
             <div className="card-title">Profile details</div>
-            {[
-              ["Full name", profile.full_name],
-              ["Institutional email", profile.email],
-              ["Course & section", profile.course_section || "Not set"],
-              ["Gender", profile.gender ? profile.gender.replace("_"," ") : "Prefer not to say"],
-              ["Member since", new Date(profile.created_at).toLocaleDateString()],
-            ].map(([lbl, val]) => (
-              <div key={lbl} style={{marginBottom:14}}>
-                <div style={{fontSize:11,color:"#857d6c",fontWeight:600,textTransform:"capitalize"}}>{lbl}</div>
-                <div style={{fontSize:14}}>{val}</div>
+            <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(220px, 1fr))", gap:"10px 32px"}}>
+              <div>
+                <div style={{fontSize:11.5,fontWeight:700,color:"#544f43",marginBottom:10,textTransform:"uppercase",letterSpacing:".03em"}}>
+                  Student info
+                </div>
+                {[
+                  ["Full name", profile.full_name],
+                  ["Institutional email", profile.email],
+                  ["Course & section", profile.course_section || "Not set"],
+                  ["Gender", profile.gender ? profile.gender.replace("_"," ") : "Prefer not to say"],
+                  ["Member since", new Date(profile.created_at).toLocaleDateString()],
+                ].map(([lbl, val]) => (
+                  <div key={lbl} style={{marginBottom:14}}>
+                    <div style={{fontSize:11,color:"#857d6c",fontWeight:600,textTransform:"capitalize"}}>{lbl}</div>
+                    <div style={{fontSize:14}}>{val}</div>
+                  </div>
+                ))}
               </div>
-            ))}
-            <button className="btn primary" style={{width:"100%",padding:13}} onClick={() => setEditing(true)}>Edit profile</button>
+              <div>
+                <div style={{fontSize:11.5,fontWeight:700,color:"#544f43",marginBottom:10,textTransform:"uppercase",letterSpacing:".03em"}}>
+                  Boarding house & landlord
+                </div>
+                {[
+                  ["Boarding house", profile.current_boarding_house || "Not yet reported"],
+                  ["Barangay", profile.current_barangay || "Not yet reported"],
+                  ["Landlord", profile.landlord_name || "Not on file"],
+                  ["Landlord contact", profile.landlord_contact || "Not on file"],
+                ].map(([lbl, val]) => (
+                  <div key={lbl} style={{marginBottom:14}}>
+                    <div style={{fontSize:11,color:"#857d6c",fontWeight:600,textTransform:"capitalize"}}>{lbl}</div>
+                    <div style={{fontSize:14}}>{val}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <button className="btn primary" style={{width:"100%",padding:13,marginTop:4}} onClick={() => setEditing(true)}>Edit profile</button>
           </div>
+          )
         ) : (
           <div className="card">
             <div className="card-title">Edit profile</div>

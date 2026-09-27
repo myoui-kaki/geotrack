@@ -76,6 +76,10 @@ export default function StudentDirectory() {
       <div className="student-header">
         <div className="greet">Browse</div>
         <h2>Boarding house directory</h2>
+        <p style={{ fontSize:12.5, color:"#857d6c", marginTop:6 }}>
+          A "Verified" boarding house has a confirmed business permit on file with its barangay.
+          "Pending" means the permit has not been confirmed yet.
+        </p>
       </div>
 
 

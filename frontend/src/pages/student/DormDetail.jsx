@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { api } from "../../api/client";
 import LocationMap from "../../components/LocationMap";
+import BarangayContactLine from "../../components/BarangayContactLine";
 
 export default function DormDetail() {
   const { houseId } = useParams();
@@ -171,6 +172,11 @@ export default function DormDetail() {
             sublabel={house?.barangay}
             height={160}
           />
+          {house?.barangay && (
+            <div style={{ marginTop: 10 }}>
+              <BarangayContactLine barangay={house.barangay} />
+            </div>
+          )}
         </div>
 
         <div 

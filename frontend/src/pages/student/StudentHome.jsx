@@ -26,9 +26,11 @@ export default function StudentHome() {
 
   return (
     <>
-      <div className="student-header">
-        <div className="greet">Good day</div>
-        <h2>Hi, {firstName}</h2>
+      <div className="student-header" style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:10, flexWrap:"wrap" }}>
+        <div>
+          <div className="greet">Good day</div>
+          <h2>Hi, {firstName}</h2>
+        </div>
       </div>
       <div className="student-body">
         {/* Only show pending-update banner - no "already submitted" banner
@@ -49,21 +51,38 @@ export default function StudentHome() {
         </div>
 
         <div className="card" style={{ marginBottom:14 }}>
-          <div className="card-title">Quick actions</div>
-          <div className="pill-row" style={{ marginBottom:8 }}>
-            <button className="btn" onClick={() => navigate("/student/status")}>Status update</button>
-            <button className="btn" onClick={() => navigate("/student/directory")}>Directory</button>
+          <div className="qa-card-header">
+            <div className="card-title" style={{ marginBottom:0 }}>Quick actions</div>
+            <div className="qa-subtitle">Your most-used student services</div>
           </div>
-          <div className="pill-row">
-            <button className="btn" onClick={() => navigate("/student/concern")}>Report concern</button>
-            <button className="btn" onClick={() => navigate("/student/profile")}>My profile</button>
-          </div>
-          <div className="pill-row" style={{ marginTop:8 }}>
-            <button className="btn" style={{ width:"100%", borderColor:"var(--pin)", color:"var(--pin)", fontWeight:700 }}
-              onClick={() => navigate("/student/sos")}>
-              Emergency SOS
+
+          <div className="quick-actions-grid">
+            <button className="qa-btn" onClick={() => navigate("/student/status")}>
+              <span className="qa-num"></span>
+              <span className="qa-label">Status update</span>
+              <span className="qa-arrow" aria-hidden="true">↗</span>
+            </button>
+            <button className="qa-btn" onClick={() => navigate("/student/directory")}>
+              <span className="qa-num"></span>
+              <span className="qa-label">Directory</span>
+              <span className="qa-arrow" aria-hidden="true">↗</span>
+            </button>
+            <button className="qa-btn" onClick={() => navigate("/student/concern")}>
+              <span className="qa-num"></span>
+              <span className="qa-label">Report concern</span>
+              <span className="qa-arrow" aria-hidden="true">↗</span>
+            </button>
+            <button className="qa-btn" onClick={() => navigate("/student/profile")}>
+              <span className="qa-num"></span>
+              <span className="qa-label">My profile</span>
+              <span className="qa-arrow" aria-hidden="true">↗</span>
             </button>
           </div>
+
+          <button className="qa-sos-btn" onClick={() => navigate("/student/sos")}>
+            <span className="qa-sos-dot" aria-hidden="true"></span>
+            Emergency SOS
+          </button>
         </div>
 
         <div className="card">

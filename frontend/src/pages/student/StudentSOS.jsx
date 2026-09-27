@@ -25,16 +25,6 @@ import { api } from "../../api/client";
 
 const CATEGORIES = ["Medical Emergency", "Safety Threat", "Fire", "Natural Disaster", "Other"];
 
-// TODO: replace the barangay/campus rows with your actual numbers before
-// the defense/demo. 911 and 117 are the real nationwide PH hotlines and can
-// stay as-is.
-const EMERGENCY_CONTACTS = [
-  { name: "National Emergency Hotline", number: "911", note: "Police, fire, medical - nationwide" },
-  { name: "PNP Text Hotline", number: "117", note: "Text for police assistance" },
-  { name: "Barangay VII Tanod", number: "09XXXXXXXXX", note: "Update with the actual barangay contact" },
-  { name: "OSAS / Campus Security", number: "09XXXXXXXXX", note: "Update with the actual campus security line" },
-];
-
 function telHref(number) {
   return `tel:${number.replace(/\s+/g, "")}`;
 }
@@ -94,8 +84,29 @@ function Timeline({ entries }) {
 
 // Always rendered, regardless of network status - these are plain data and
 // tel:/sms: links, not API calls, so they work with no wifi/data as long as
-// the phone still has cellular signal.
-function EmergencyContactsCard({ coords }) {
+// the phone still has cellular signal. `directory`, when it loaded
+// successfully, fills in the actual barangay/OSAS numbers that account
+// holder set on their own Profile page - if it's still unset or the fetch
+// failed (offline), the placeholder rows below are shown instead so the
+// list is never empty.
+function buildContacts(directory) {
+  const barangay = directory?.barangay_contacts?.find(c => c.contact_number);
+  const osas = directory?.osas_contacts?.find(c => c.contact_number);
+
+  return [
+    { name: "National Emergency Hotline", number: "911", note: "Police, fire, medical - nationwide" },
+    { name: "PNP Text Hotline", number: "117", note: "Text for police assistance" },
+    barangay
+      ? { name: `Barangay${barangay.role_label ? ` ${barangay.role_label}` : ""}`, number: barangay.contact_number, note: barangay.full_name }
+      : { name: "Barangay Tanod", number: "09XXXXXXXXX", note: "Not set yet - the barangay account can add this in their Profile" },
+    osas
+      ? { name: "OSAS / Campus Security", number: osas.contact_number, note: osas.full_name }
+      : { name: "OSAS / Campus Security", number: "09XXXXXXXXX", note: "Not set yet - the OSAS account can add this in their Profile" },
+  ];
+}
+
+function EmergencyContactsCard({ coords, directory }) {
+  const contacts = buildContacts(directory);
   return (
     <div className="card" style={{ borderLeft:"4px solid var(--pin)" }}>
       <div className="card-title">Direct emergency contacts</div>
@@ -103,7 +114,7 @@ function EmergencyContactsCard({ coords }) {
         Call or text these directly for immediate help - this works even without
         mobile data or wifi, as long as you have phone signal.
       </p>
-      {EMERGENCY_CONTACTS.map(c => (
+      {contacts.map(c => (
         <div key={c.name} style={{
           display:"flex", justifyContent:"space-between", alignItems:"center",
           padding:"10px 0", borderBottom:"1px solid #ece7da", gap:10,
@@ -132,6 +143,9 @@ export default function StudentSOS() {
   const [sending, setSending] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [offlineNotice, setOfflineNotice] = useState(false);
+  // Live barangay/OSAS numbers, if reachable - null just means "still
+  // offline/unset", the static placeholders in buildContacts() cover that.
+  const [directory, setDirectory] = useState(null);
 
   // A fetch() that fails before reaching the server (no connection at all)
   // throws a plain TypeError - that's the signal we treat as "offline"
@@ -150,6 +164,11 @@ export default function StudentSOS() {
   }
 
   useEffect(() => { loadCases(); }, []);
+  useEffect(() => {
+    // Best-effort - if this fails (offline, etc.) buildContacts() just
+    // keeps using the static placeholder rows, so no error handling needed.
+    api.contactsDirectory().then(setDirectory).catch(() => {});
+  }, []);
 
   const activeCase = cases?.find(c => c.status === "Active" || c.status === "Responding");
   const history = (cases || []).filter(c => c.status === "Resolved" || c.status === "Cancelled");
@@ -219,7 +238,7 @@ export default function StudentSOS() {
           </div>
         )}
 
-        <EmergencyContactsCard coords={coords} />
+        <EmergencyContactsCard coords={coords} directory={directory} />
 
         {cases === null ? (
           <div className="card" style={{ marginTop:14 }}><p style={{fontSize:12.5,color:"#6b6457"}}>Loading...</p></div>
@@ -284,11 +303,11 @@ export default function StudentSOS() {
                 Pick a category to notify OSAS so they're aware and can follow up.
                 For life-threatening emergencies, use the direct contacts above.
               </div>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+              <div className="sos-category-grid">
                 {CATEGORIES.map(cat => (
-                  <button key={cat} className="btn" onClick={() => startConfirm(cat)}
-                    style={{ padding:"16px 10px", fontWeight:700, borderColor:"var(--pin)", color:"var(--pin)" }}>
-                    {cat}
+                  <button key={cat} className="sos-cat-btn" onClick={() => startConfirm(cat)}>
+                    <span>{cat}</span>
+                    <span className="sos-cat-arrow" aria-hidden="true">→</span>
                   </button>
                 ))}
               </div>

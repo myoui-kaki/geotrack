@@ -2,6 +2,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
+import GeoTrackSplash from "./components/GeoTrackSplash";
 
 // Student pages
 import StudentLogin     from "./pages/student/StudentLogin";
@@ -13,7 +14,6 @@ import DormDetail       from "./pages/student/DormDetail";
 import StudentConcern   from "./pages/student/StudentConcern";
 import StudentSOS       from "./pages/student/StudentSOS";
 import StudentProfile   from "./pages/student/StudentProfile";
-import StudentNotifications from "./pages/student/StudentNotifications";
 import ForgotPassword   from "./pages/student/ForgotPassword";
 import ResetPassword    from "./pages/student/ResetPassword";
 import VerifyOTP        from "./pages/student/VerifyOTP";
@@ -23,22 +23,24 @@ import TwoFAVerify      from "./pages/student/TwoFAVerify";
 import OsasLogin          from "./pages/osas/OsasLogin";
 import OsasLayout         from "./pages/osas/OsasLayout";
 import OsasDashboard      from "./pages/osas/OsasDashboard";
-import OsasStatusUpdates  from "./pages/osas/OsasStatusUpdates";
-import OsasVerification   from "./pages/osas/OsasVerification";
-import OsasReviews        from "./pages/osas/OsasReviews";
-import OsasConcerns       from "./pages/osas/OsasConcerns";
-import OsasEmergencies    from "./pages/osas/OsasEmergencies";
-import OsasAnnouncements  from "./pages/osas/OsasAnnouncements";
-import OsasReports        from "./pages/osas/OsasReports";
 import OsasAccounts       from "./pages/osas/OsasAccounts";
-import OsasAuditLogs      from "./pages/osas/OsasAuditLogs";
-import OsasNotifications  from "./pages/osas/OsasNotifications";
-import OsasCompliance     from "./pages/osas/OsasCompliance";
-import OsasRiskAssessment from "./pages/osas/OsasRiskAssessment";
+import OsasStatusUpdates    from "./pages/osas/OsasStatusUpdates";
+import OsasHousingOversight from "./pages/osas/OsasHousingOversight";
+import OsasConcernsAlerts   from "./pages/osas/OsasConcernsAlerts";
+import OsasReports           from "./pages/osas/OsasReports";
+
+// Barangay pages
+import BarangayLogin      from "./pages/barangay/BarangayLogin";
+import BarangayLayout     from "./pages/barangay/BarangayLayout";
+import BarangayBoardingHouses from "./pages/barangay/BarangayBoardingHouses";
+import BarangayEmergencies    from "./pages/barangay/BarangayEmergencies";
+import BarangayConcerns       from "./pages/barangay/BarangayConcerns";
+import BarangayProfile        from "./pages/barangay/BarangayProfile";
 
 export default function App() {
   return (
     <AuthProvider>
+      <GeoTrackSplash />
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Navigate to="/student/login" replace />} />
@@ -60,7 +62,6 @@ export default function App() {
             <Route path="directory/:houseId" element={<DormDetail />} />
             <Route path="concern"          element={<StudentConcern />} />
             <Route path="sos"              element={<StudentSOS />} />
-            <Route path="notifications"    element={<StudentNotifications />} />
             <Route path="profile"          element={<StudentProfile />} />
           </Route>
 
@@ -72,18 +73,35 @@ export default function App() {
             <ProtectedRoute requiredRole="osas_admin"><OsasLayout /></ProtectedRoute>
           }>
             <Route path="dashboard"      element={<OsasDashboard />} />
-            <Route path="status-updates" element={<OsasStatusUpdates />} />
-            <Route path="verification"   element={<OsasVerification />} />
-            <Route path="reviews"        element={<OsasReviews />} />
-            <Route path="concerns"       element={<OsasConcerns />} />
-            <Route path="emergencies"    element={<OsasEmergencies />} />
-            <Route path="announcements"  element={<OsasAnnouncements />} />
-            <Route path="reports"        element={<OsasReports />} />
             <Route path="accounts"       element={<OsasAccounts />} />
-            <Route path="audit-logs"     element={<OsasAuditLogs />} />
-            <Route path="notifications"  element={<OsasNotifications />} />
-            <Route path="compliance"     element={<OsasCompliance />} />
-            <Route path="risk-assessment" element={<OsasRiskAssessment />} />
+            <Route path="reports"        element={<OsasReports />} />
+            <Route path="status-updates" element={<OsasStatusUpdates />} />
+
+            {/* -- Consolidated pages (sidebar entries) -- */}
+            <Route path="housing-oversight" element={<OsasHousingOversight />} />
+            <Route path="concerns-alerts"   element={<OsasConcernsAlerts />} />
+
+            {/* -- Old paths kept working, landing on the matching tab, so
+                 existing internal links/navigate() calls and any bookmarks
+                 still go to the right place -- */}
+            <Route path="risk-assessment" element={<Navigate to="/osas/status-updates" replace />} />
+            <Route path="verification"    element={<OsasHousingOversight defaultTab={0} />} />
+            <Route path="reviews"         element={<OsasHousingOversight defaultTab={1} />} />
+            <Route path="concerns"        element={<OsasConcernsAlerts defaultTab={0} />} />
+            <Route path="emergencies"     element={<OsasConcernsAlerts defaultTab={1} />} />
+          </Route>
+
+          {/* -- Barangay (public) -- */}
+          <Route path="/barangay/login" element={<BarangayLogin />} />
+
+          {/* -- Barangay (protected) -- */}
+          <Route path="/barangay" element={
+            <ProtectedRoute requiredRole="barangay"><BarangayLayout /></ProtectedRoute>
+          }>
+            <Route path="boarding-houses" element={<BarangayBoardingHouses />} />
+            <Route path="emergencies"     element={<BarangayEmergencies />} />
+            <Route path="concerns"        element={<BarangayConcerns />} />
+            <Route path="profile"         element={<BarangayProfile />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/student/login" replace />} />
