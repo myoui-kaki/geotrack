@@ -123,7 +123,12 @@ class BarangayPermitUpdate(BaseModel):
     has_barangay_permit: bool
 
 class BarangayProfileOut(BaseModel):
-    id: int; full_name: str; email: EmailStr
+    # email is a plain str here, not EmailStr - this is an OUTPUT schema
+    # reading an already-stored, already-trusted address back out, and
+    # EmailStr's strict validator rejects reserved/special-use TLDs like
+    # ".local" (used by some seeded/test accounts), which would otherwise
+    # crash every response for that account with a 500.
+    id: int; full_name: str; email: str
     barangay_name: Optional[str] = None
     contact_number: Optional[str] = None
     created_at: datetime
@@ -134,7 +139,8 @@ class BarangayProfileUpdate(BaseModel):
     contact_number: Optional[str] = None
 
 class OsasProfileOut(BaseModel):
-    id: int; full_name: str; email: EmailStr
+    # see BarangayProfileOut above - output schema, so plain str not EmailStr.
+    id: int; full_name: str; email: str
     position: Optional[str] = None
     contact_number: Optional[str] = None
     created_at: datetime
@@ -229,21 +235,22 @@ class ConcernAdminOut(ConcernOut):
 
 # ─── Account management ───────────────────────────────────────────────────────
 class OsasAccountOut(BaseModel):
-    id: int; full_name: str; email: EmailStr; position: Optional[str] = None
+    # output schema - plain str, see BarangayProfileOut above.
+    id: int; full_name: str; email: str; position: Optional[str] = None
     class Config: from_attributes = True
 
 class OsasAccountUpdate(BaseModel):
     full_name: Optional[str] = None; position: Optional[str] = None
 
 class StudentAccountOut(BaseModel):
-    id: int; full_name: str; email: EmailStr
+    id: int; full_name: str; email: str
     course_section: Optional[str] = None; gender: Optional[str] = None
     created_at: datetime; is_archived: bool = False
     archived_at: Optional[datetime] = None
     class Config: from_attributes = True
 
 class MyProfileOut(BaseModel):
-    id: int; full_name: str; email: EmailStr
+    id: int; full_name: str; email: str
     course_section: Optional[str] = None; gender: Optional[str] = None
     created_at: datetime; two_fa_enabled: bool = False
     # Current boarding house, populated server-side from the student's most
@@ -341,7 +348,7 @@ class NotificationOut(BaseModel):
 class RiskAssessmentRow(BaseModel):
     student_id: int
     student_name: str
-    email: EmailStr
+    email: str
     course_section: Optional[str] = None
     missed_submissions: int
     emergency_count: int
