@@ -22,6 +22,20 @@ def validate_strong_password(v: str) -> str:
 
 
 # ─── Auth ─────────────────────────────────────────────────────────────────────
+def validate_lspu_student_email(v: str) -> str:
+    """Shared LSPU institutional-email check - used by both password
+    registration (RegisterStudentRequest below) and Google sign-in/sign-up
+    (main.py), so a student can only ever get in with a real
+    STUDENTID@lspu.edu.ph address either way."""
+    v = str(v).lower().strip()
+    if not v.endswith("@lspu.edu.ph"):
+        raise ValueError("Only LSPU institutional emails are accepted (STUDENTID@lspu.edu.ph).")
+    local = v.split("@")[0]
+    if not re.fullmatch(r"[\d][\d\-]+[\d]", local):
+        raise ValueError("Username must be your Student ID format (e.g. 0323-4198).")
+    return v
+
+
 class RegisterStudentRequest(BaseModel):
     full_name: str
     email: EmailStr
@@ -38,14 +52,7 @@ class RegisterStudentRequest(BaseModel):
     @field_validator("email")
     @classmethod
     def check_lspu_domain(cls, v: str) -> str:
-        import re as _re
-        v = str(v).lower().strip()
-        if not v.endswith("@lspu.edu.ph"):
-            raise ValueError("Only LSPU institutional emails are accepted (STUDENTID@lspu.edu.ph).")
-        local = v.split("@")[0]
-        if not _re.fullmatch(r"[\d][\d\-]+[\d]", local):
-            raise ValueError("Username must be your Student ID format (e.g. 0323-4198).")
-        return v
+        return validate_lspu_student_email(v)
 
     @field_validator("password")
     @classmethod
@@ -61,6 +68,19 @@ class RegisterOsasRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def check_strength(cls, v): return validate_strong_password(v)
+
+
+class GoogleAuthRequest(BaseModel):
+    # The Google ID token (JWT) returned by Google Identity Services on the
+    # frontend - main.py verifies this server-side before trusting anything
+    # in it.
+    credential: str
+    # Only read for role="barangay": a barangay account has no other way to
+    # know which barangay it represents, since that's not part of the
+    # Google profile. Ignored for student/osas, and ignored for an existing
+    # barangay account (its barangay_name is already set and isn't changed
+    # by signing in again).
+    barangay_name: Optional[str] = None
 
 
 class TokenResponse(BaseModel):

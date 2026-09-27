@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import { useAuth } from "../../context/AuthContext";
+import GoogleSignInButton from "../../components/GoogleSignInButton";
 import "./student.css";
 
 function getStrength(pw) {
@@ -168,6 +169,13 @@ export default function StudentLogin() {
     } finally { setLoading(false); }
   }
 
+  function handleGoogleSuccess(session) {
+    setError("");
+    if (session.role !== "student") { setError("This account is not registered as a student."); return; }
+    login(session);
+    navigate("/student/home");
+  }
+
   return (
     <div className="student-login-wrap">
       <div className="student-login-card">
@@ -195,6 +203,20 @@ export default function StudentLogin() {
         <h1 className="form-title">{mode === "login" ? "Welcome back" : "Create your account"}</h1>
 
         {error && <div className="error-banner">{error}</div>}
+
+        <GoogleSignInButton role="student" onSuccess={handleGoogleSuccess} onError={setError} />
+        <div style={{ textAlign:"center", fontSize:10.5, color:"#a39c8a", marginTop:6 }}>
+          By continuing with Google, you agree to the{" "}
+          <button type="button" onClick={() => setTermsOpen(true)} style={{
+            background:"none", border:"none", color:"#a39c8a", textDecoration:"underline",
+            cursor:"pointer", fontSize:10.5, fontFamily:"inherit", padding:0,
+          }}>Terms &amp; Conditions</button>.
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:10, margin:"16px 0" }}>
+          <div style={{ flex:1, height:1, background:"var(--line)" }} />
+          <span style={{ fontSize:11.5, color:"#a39c8a" }}>or use your student email</span>
+          <div style={{ flex:1, height:1, background:"var(--line)" }} />
+        </div>
 
         <form onSubmit={handleSubmit}>
           {mode === "register" && (

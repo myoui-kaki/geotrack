@@ -1,20 +1,23 @@
 // src/pages/barangay/BarangayLogin.jsx
 //
-// Login only - barangay accounts are created by OSAS (not self-registered),
-// since each one is scoped to a specific barangay via barangay_name on the
-// account, and that scoping shouldn't be something anyone can set for
-// themselves at signup.
+// Password sign-in is for existing accounts (still created by OSAS, scoped
+// to a barangay via barangay_name). Google sign-in/sign-up is also offered
+// here now - a brand new barangay account created that way needs the
+// barangay name typed in once (there's no other way to know which barangay
+// it represents), which is what the extra field below is for.
 
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import { useAuth } from "../../context/AuthContext";
+import GoogleSignInButton from "../../components/GoogleSignInButton";
 import "../osas/osas.css";
 
 export default function BarangayLogin() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
+  const [googleBarangayName, setGoogleBarangayName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -43,6 +46,13 @@ export default function BarangayLogin() {
     }
   }
 
+  function handleGoogleSuccess(session) {
+    setError("");
+    if (session.role !== "barangay") { setError("This account is not registered as a barangay account."); return; }
+    login(session);
+    navigate("/barangay/boarding-houses");
+  }
+
   return (
     <div className="osas-login-wrap">
       <div className="osas-login-card">
@@ -64,6 +74,19 @@ export default function BarangayLogin() {
           <p className="form-hint">This portal is restricted to barangay accounts set up by OSAS.</p>
 
           {error && <div className="error-banner">{error}</div>}
+
+          <div className="field">
+            <label>Barangay you represent <span style={{ color:"#a39c8a" }}>(only needed the first time)</span></label>
+            <input value={googleBarangayName} onChange={e => setGoogleBarangayName(e.target.value)}
+              placeholder="e.g. Brgy. Del Remedio" />
+          </div>
+          <GoogleSignInButton role="barangay" extra={{ barangay_name: googleBarangayName }}
+            onSuccess={handleGoogleSuccess} onError={setError} />
+          <div style={{ display:"flex", alignItems:"center", gap:10, margin:"16px 0" }}>
+            <div style={{ flex:1, height:1, background:"var(--line)" }} />
+            <span style={{ fontSize:11.5, color:"#a39c8a" }}>or use your email</span>
+            <div style={{ flex:1, height:1, background:"var(--line)" }} />
+          </div>
 
           <form onSubmit={handleSubmit}>
             <div className="field">
@@ -88,7 +111,7 @@ export default function BarangayLogin() {
           </form>
 
           <div className="scope-note">
-            Need an account? Contact OSAS - barangay accounts are set up by them.
+            Have a password already set up by OSAS? Use it above - or sign in/up with Google.
           </div>
         </div>
       </div>

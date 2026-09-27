@@ -17,6 +17,8 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, extract
 from datetime import datetime, timedelta
+from google.oauth2 import id_token as google_id_token
+from google.auth.transport import requests as google_requests
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -54,6 +56,35 @@ ALLOWED_ORIGINS = [o.strip() for o in _origins_env.split(",") if o.strip()] or [
 ]
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+# ─── Google Sign-In ────────────────────────────────────────────────────────────
+# Set in Railway (and locally in .env) from the OAuth Client ID you create in
+# Google Cloud Console -> APIs & Services -> Credentials. This same value is
+# also what the frontend's VITE_GOOGLE_CLIENT_ID must be set to - a Google ID
+# token is only valid for the one Client ID it was issued for.
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+
+def _verify_google_token(credential: str) -> dict:
+    """Verifies a Google ID token (the `credential` Google Identity Services
+    hands the frontend after a successful Google sign-in) and returns its
+    payload. Raises HTTPException on anything invalid, so callers can just
+    trust whatever comes back."""
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(500, "Google Sign-In isn't configured on the server yet (missing GOOGLE_CLIENT_ID).")
+    try:
+        payload = google_id_token.verify_oauth2_token(
+            credential, google_requests.Request(), GOOGLE_CLIENT_ID
+        )
+    except ValueError:
+        # Malformed/expired/wrong-audience token - the normal case for a bad sign-in attempt.
+        raise HTTPException(401, "Invalid or expired Google sign-in. Please try again.")
+    except Exception:
+        # Anything else (e.g. a transient failure reaching Google's cert
+        # endpoint) - still a clean, CORS-safe response instead of a raw 500.
+        raise HTTPException(503, "Couldn't reach Google to verify your sign-in. Please try again in a moment.")
+    if not payload.get("email_verified", False):
+        raise HTTPException(401, "Your Google account's email isn't verified.")
+    return payload
 
 # Without this, an unhandled exception in a route bypasses CORSMiddleware
 # entirely (it re-raises straight up to Starlette's outer error handler),
@@ -345,6 +376,96 @@ def register_osas(payload: schemas.RegisterOsasRequest, db: Session = Depends(ge
                        is_email_verified=True)
     db.add(user); db.commit(); db.refresh(user)
     log_action(db, user, "create", "user", user.id, user.full_name, "OSAS admin registered")
+    token = create_access_token({"sub": str(user.id), "role": user.role})
+    return schemas.TokenResponse(access_token=token, role=user.role, full_name=user.full_name)
+
+
+# ─── Google Sign-In / Sign-Up ───────────────────────────────────────────────
+# Same shape for all three roles: verify the Google ID token, then either
+# log an existing account in (linking it to this Google account on first
+# use) or auto-register a new one - all in one request, since Google has
+# already done the "is this really them" work for us. Each of these three
+# creates a real password-login account row too (with an unguessable random
+# password), so nothing else in the app needs to know or care that the
+# account came in through Google rather than the password form.
+
+@app.post("/api/auth/google/student", response_model=schemas.TokenResponse)
+def google_auth_student(payload: schemas.GoogleAuthRequest, db: Session = Depends(get_db)):
+    info = _verify_google_token(payload.credential)
+    try:
+        email = schemas.validate_lspu_student_email(info["email"])
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if user and user.role != "student":
+        raise HTTPException(409, "This email is already registered under a different GeoTrack account type.")
+
+    if user is None:
+        user = models.User(
+            full_name=info.get("name") or email.split("@")[0],
+            email=email, hashed_password=hash_password(secrets.token_urlsafe(32)),
+            role="student", is_email_verified=True, google_sub=info["sub"],
+        )
+        db.add(user); db.commit(); db.refresh(user)
+        log_action(db, user, "create", "user", user.id, user.full_name, "Student registered via Google")
+    elif not user.google_sub:
+        user.google_sub = info["sub"]; user.is_email_verified = True
+        db.commit()
+
+    token = create_access_token({"sub": str(user.id), "role": user.role})
+    return schemas.TokenResponse(access_token=token, role=user.role, full_name=user.full_name)
+
+
+@app.post("/api/auth/google/osas", response_model=schemas.TokenResponse)
+def google_auth_osas(payload: schemas.GoogleAuthRequest, db: Session = Depends(get_db)):
+    info = _verify_google_token(payload.credential)
+    email = info["email"].lower().strip()
+
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if user and user.role != "osas_admin":
+        raise HTTPException(409, "This email is already registered under a different GeoTrack account type.")
+
+    if user is None:
+        user = models.User(
+            full_name=info.get("name") or email.split("@")[0],
+            email=email, hashed_password=hash_password(secrets.token_urlsafe(32)),
+            role="osas_admin", is_email_verified=True, google_sub=info["sub"],
+        )
+        db.add(user); db.commit(); db.refresh(user)
+        log_action(db, user, "create", "user", user.id, user.full_name, "OSAS admin registered via Google")
+    elif not user.google_sub:
+        user.google_sub = info["sub"]; db.commit()
+
+    token = create_access_token({"sub": str(user.id), "role": user.role})
+    return schemas.TokenResponse(access_token=token, role=user.role, full_name=user.full_name)
+
+
+@app.post("/api/auth/google/barangay", response_model=schemas.TokenResponse)
+def google_auth_barangay(payload: schemas.GoogleAuthRequest, db: Session = Depends(get_db)):
+    info = _verify_google_token(payload.credential)
+    email = info["email"].lower().strip()
+
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if user and user.role != "barangay":
+        raise HTTPException(409, "This email is already registered under a different GeoTrack account type.")
+
+    if user is None:
+        barangay_name = (payload.barangay_name or "").strip()
+        if not barangay_name:
+            raise HTTPException(400, "Please enter which barangay this account represents.")
+        user = models.User(
+            full_name=info.get("name") or email.split("@")[0],
+            email=email, hashed_password=hash_password(secrets.token_urlsafe(32)),
+            role="barangay", barangay_name=barangay_name,
+            is_email_verified=True, google_sub=info["sub"],
+        )
+        db.add(user); db.commit(); db.refresh(user)
+        log_action(db, user, "create", "user", user.id, user.full_name,
+                   f"Barangay account registered via Google ({barangay_name})")
+    elif not user.google_sub:
+        user.google_sub = info["sub"]; db.commit()
+
     token = create_access_token({"sub": str(user.id), "role": user.role})
     return schemas.TokenResponse(access_token=token, role=user.role, full_name=user.full_name)
 

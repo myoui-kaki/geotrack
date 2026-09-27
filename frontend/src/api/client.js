@@ -79,6 +79,10 @@ export const api = {
   getToken, getRole, getFullName, setSession, clearSession, loginRequest, AuthError,
   registerStudent:  p => request("/auth/register/student", {method:"POST",body:p}),
   registerOsasAdmin:p => request("/auth/register/osas",   {method:"POST",body:p}),
+  // role: "student" | "osas" | "barangay" - matches the path prefix, and
+  // the backend route (/auth/google/<role>) one-to-one. extra is only ever
+  // used for barangay's first-time-signup barangay_name.
+  googleAuth:       (role,credential,extra={}) => request(`/auth/google/${role}`,{method:"POST",body:{credential,...extra}}),
   verifyOTP:        (email,otp) => request("/auth/verify-otp",{method:"POST",body:{email,otp}}),
   resendOTP:        email => request(`/auth/resend-otp?email=${encodeURIComponent(email)}`,{method:"POST"}),
   forgotPassword:   email => request("/auth/forgot-password",{method:"POST",body:{email}}),

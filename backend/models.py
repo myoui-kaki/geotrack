@@ -25,6 +25,14 @@ class User(Base):
     # editable by the account itself from its own Profile page.
     contact_number = Column(String, nullable=True)
 
+    # Google Sign-In: Google's stable per-account "sub" claim, set once an
+    # account has signed in with Google (whether it was created that way or
+    # linked to an existing password account by matching email). A password-
+    # only account has this as None. We link by google_sub rather than only
+    # by email so a later email change on the Google side can't silently
+    # re-target a different local account.
+    google_sub = Column(String, unique=True, nullable=True, index=True)
+
     # Login security
     failed_login_attempts = Column(Integer, default=0)
     locked_until = Column(DateTime, nullable=True)

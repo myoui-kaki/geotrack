@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import { useAuth } from "../../context/AuthContext";
+import GoogleSignInButton from "../../components/GoogleSignInButton";
 import "./osas.css";
 
 export default function OsasLogin() {
@@ -48,6 +49,13 @@ export default function OsasLogin() {
     }
   }
 
+  function handleGoogleSuccess(session) {
+    setError("");
+    if (session.role !== "osas_admin") { setError("This account is not registered as OSAS personnel."); return; }
+    login(session);
+    navigate("/osas/dashboard");
+  }
+
   return (
     <div className="osas-login-wrap">
       <div className="osas-login-card">
@@ -74,6 +82,13 @@ export default function OsasLogin() {
           <p className="form-hint">This dashboard is restricted to OSAS administrators.</p>
 
           {error && <div className="error-banner">{error}</div>}
+
+          <GoogleSignInButton role="osas" onSuccess={handleGoogleSuccess} onError={setError} />
+          <div style={{ display:"flex", alignItems:"center", gap:10, margin:"16px 0" }}>
+            <div style={{ flex:1, height:1, background:"var(--line)" }} />
+            <span style={{ fontSize:11.5, color:"#a39c8a" }}>or use your email</span>
+            <div style={{ flex:1, height:1, background:"var(--line)" }} />
+          </div>
 
           <form onSubmit={handleSubmit}>
             {mode === "register" && (
