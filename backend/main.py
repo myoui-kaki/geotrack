@@ -49,6 +49,7 @@ _origins_env = os.getenv("ALLOWED_ORIGINS", "")
 ALLOWED_ORIGINS = [o.strip() for o in _origins_env.split(",") if o.strip()] or [
     "https://geotrack-osas.vercel.app",
     "https://geotrack-lspu.vercel.app",
+    "https://geotrack-spcc.up.railway.app",
     "http://localhost:5173",
 ]
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
