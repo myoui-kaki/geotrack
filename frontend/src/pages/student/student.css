@@ -41,14 +41,18 @@
 }
 .scope-note a{color:var(--moss-dark); font-weight:700;}
 
-/* ---------- mobile shell used by every student page after login ---------- */
+/* ---------- shell used by every student page after login ----------
+   Full-bleed by default (mobile/tablet), same edge-to-edge treatment as
+   the OSAS/Barangay shells - no floating rounded "phone card" or tinted
+   outer background while on a phone/PWA screen. Desktop (900px+, below)
+   keeps this same full-bleed structure, just adds the docked sidebar. */
 .student-shell{
-  min-height:100vh; background:#e7e2d4; display:flex; justify-content:center; padding:24px;
+  min-height:100vh; min-height:100dvh; background:var(--paper); padding:0;
 }
 .student-phone{
-  width:100%; max-width:420px; background:var(--paper); border-radius:28px;
-  min-height:760px; display:flex; flex-direction:column; overflow:hidden;
-  box-shadow:0 30px 60px -30px rgba(28,43,36,.35);
+  width:100%; max-width:none; min-height:100vh; min-height:100dvh;
+  background:var(--paper); border-radius:0; box-shadow:none;
+  display:flex; flex-direction:column; overflow:hidden;
 }
 .student-header{padding:24px 22px 12px; flex-shrink:0;}
 .student-header .greet{font-size:12px; color:#857d6c;}
@@ -96,7 +100,7 @@
 .nav-btn{
   display:flex; flex-direction:column; align-items:center; gap:4px;
   font-size:10px; color:#a39c8a; font-weight:600; background:none; border:none; font-family:var(--font-body);
-  cursor:pointer;
+  cursor:pointer; text-decoration:none;
 }
 .nav-btn .ic{
   width:6px;
@@ -189,8 +193,6 @@
    nav doesn't make sense yet at this width. ============ */
 @media (min-width:600px) and (max-width:899px){
   .student-login-card{ max-width:480px; padding:40px 36px; }
-  .student-shell{ padding:36px; }
-  .student-phone{ max-width:560px; min-height:80vh; border-radius:20px; }
   .student-header{ padding:28px 32px 14px; }
   .student-body{ padding:8px 32px 24px; }
 }
