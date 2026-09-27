@@ -59,7 +59,12 @@ async function request(path, { method="GET", body, formEncoded=false }={}) {
   if (!res.ok) {
     let detail = `Request failed (${res.status})`;
     try { const e = await res.json(); detail = Array.isArray(e.detail) ? e.detail.map(x=>x.msg).join(" ") : (e.detail||detail); } catch {}
-    if (res.status===401||res.status===403) { clearSession(); throw new AuthError("Session expired. Please sign in again."); }
+    // A 401/403 only means "your session expired" when this request WAS
+    // carrying a token (an already-logged-in user got rejected). A login
+    // attempt itself never carries one - there's no session yet - so a
+    // 401 there is a rejected login (wrong password, account not found,
+    // etc.) and should show the server's real message instead.
+    if (token && (res.status===401||res.status===403)) { clearSession(); throw new AuthError("Session expired. Please sign in again."); }
     throw new Error(detail);
   }
   const text = await res.text(); return text ? JSON.parse(text) : null;
