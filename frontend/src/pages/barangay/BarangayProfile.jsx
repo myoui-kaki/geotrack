@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import { useAuth } from "../../context/AuthContext";
+import InstallAppButton from "../../components/InstallAppButton";
 
 export default function BarangayProfile() {
   const { fullName: sessionFullName, logout, updateFullName } = useAuth();
@@ -123,6 +124,10 @@ export default function BarangayProfile() {
               disabled={saving} onClick={handleSave}>
               {saving ? "Saving..." : "Save"}
             </button>
+
+            {/* Hides itself when the app is already installed or the browser
+                can't install it, so it only shows when it can actually work. */}
+            <div style={{ marginBottom: 10 }}><InstallAppButton variant="block" /></div>
 
             <button className="btn" style={{ width: "100%", padding: 12 }} onClick={handleLogout}>
               Sign out

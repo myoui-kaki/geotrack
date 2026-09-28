@@ -67,6 +67,8 @@ export default function App() {
 
           {/* -- OSAS (public) -- */}
           <Route path="/osas/login" element={<OsasLogin />} />
+          <Route path="/osas/forgot-password" element={<ForgotPassword />} />
+          <Route path="/osas/reset-password"  element={<ResetPassword />} />
 
           {/* -- OSAS (protected) -- */}
           <Route path="/osas" element={
@@ -93,6 +95,8 @@ export default function App() {
 
           {/* -- Barangay (public) -- */}
           <Route path="/barangay/login" element={<BarangayLogin />} />
+          <Route path="/barangay/forgot-password" element={<ForgotPassword />} />
+          <Route path="/barangay/reset-password"  element={<ResetPassword />} />
 
           {/* -- Barangay (protected) -- */}
           <Route path="/barangay" element={

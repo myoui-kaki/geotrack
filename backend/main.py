@@ -547,11 +547,21 @@ def disable_2fa(db: Session = Depends(get_db), user: models.User = Depends(requi
     return {"message": "2FA disabled."}
 
 
+# Where the reset link in the email points - the deployed frontend. Set
+# FRONTEND_URL in Railway if the frontend domain ever changes.
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://geotrack-spcc.up.railway.app").rstrip("/")
+_ROLE_PORTAL = {"student": "student", "osas_admin": "osas", "barangay": "barangay"}
+
 @app.post("/api/auth/forgot-password")
 def forgot_password(payload: schemas.ForgotPasswordRequest, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.email == payload.email).first()
+    # Same response whether or not the email exists, so this can't be used
+    # to find out which emails are registered. The token is ONLY ever sent
+    # to the account's own inbox - never returned in the response.
+    generic = {"message": "If that email is registered, a reset link has been sent to it."}
+    email = str(payload.email).lower().strip()
+    user = db.query(models.User).filter(models.User.email == email).first()
     if not user:
-        return {"message": "If that email is registered, a reset link has been sent.", "demo_token": None}
+        return generic
     db.query(models.PasswordResetToken).filter(
         models.PasswordResetToken.user_id == user.id,
         models.PasswordResetToken.used == False).delete()
@@ -560,8 +570,10 @@ def forgot_password(payload: schemas.ForgotPasswordRequest, db: Session = Depend
     db.add(models.PasswordResetToken(user_id=user.id, token=token,
                                      expires_at=datetime.utcnow() + timedelta(hours=1)))
     db.commit()
-    return {"message": "Reset token generated.", "demo_token": token,
-            "demo_note": "In production this is emailed. Copy and paste into the reset form."}
+    portal = _ROLE_PORTAL.get(user.role, "student")
+    link = f"{FRONTEND_URL}/{portal}/reset-password?token={token}"
+    email_utils.notify_password_reset(user.email, user.full_name, link)
+    return generic
 
 
 @app.post("/api/auth/reset-password")

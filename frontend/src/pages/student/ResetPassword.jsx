@@ -1,6 +1,6 @@
 // src/pages/student/ResetPassword.jsx
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { api } from "../../api/client";
 import "./student.css";
 
@@ -21,6 +21,7 @@ function getStrength(pw) {
 export default function ResetPassword() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const portal = useLocation().pathname.split("/")[1] || "student";
 
   const [token, setToken] = useState(searchParams.get("token") || "");
   const [password, setPassword] = useState("");
@@ -40,7 +41,7 @@ export default function ResetPassword() {
     try {
       await api.resetPassword(token, password);
       setSuccess(true);
-      setTimeout(() => navigate("/student/login"), 3000);
+      setTimeout(() => navigate(`/${portal}/login`), 3000);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -66,6 +67,7 @@ export default function ResetPassword() {
           <>
             {error && <div className="error-banner">{error}</div>}
             <form onSubmit={handleSubmit}>
+              {!searchParams.get("token") && (
               <div className="field">
                 <label>Reset token</label>
                 <input
@@ -76,6 +78,7 @@ export default function ResetPassword() {
                   style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
                 />
               </div>
+              )}
 
               <div className="field">
                 <label>New password</label>
@@ -125,7 +128,7 @@ export default function ResetPassword() {
         )}
 
         <div style={{ textAlign: "center", marginTop: 14 }}>
-          <button type="button" onClick={() => navigate("/student/login")} style={{
+          <button type="button" onClick={() => navigate(`/${portal}/login`)} style={{
             background: "none", border: "none", color: "var(--moss)", fontWeight: 700,
             cursor: "pointer", fontSize: 12.5, fontFamily: "inherit",
           }}>Back to sign in</button>

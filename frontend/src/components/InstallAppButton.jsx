@@ -94,7 +94,9 @@ export default function InstallAppButton({ variant = "default" }) {
         className={variant === "sidebar" ? "" : "btn"}
         style={variant === "sidebar"
           ? sidebarStyle
-          : { fontSize:12.5, padding:"8px 14px", fontWeight:700 }}
+          : variant === "block"
+            ? { width:"100%", padding:12, fontSize:13.5, fontWeight:700 }
+            : { fontSize:12.5, padding:"8px 14px", fontWeight:700 }}
         onClick={handleClick}
       >
         📲 Download app

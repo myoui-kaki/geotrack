@@ -158,3 +158,18 @@ def notify_email_otp(to_email, full_name, otp):
         f"This code expires in 15 minutes.\n\n"
         f"- GeoTrack, LSPU-SPCC OSAS",
     )
+
+
+def notify_password_reset(to_email, full_name, reset_link):
+    return send_email(
+        to_email,
+        "Reset your GeoTrack password",
+        f"Hi {full_name},\n\n"
+        f"We received a request to reset your GeoTrack password. "
+        f"Open the link below to choose a new one:\n\n"
+        f"{reset_link}\n\n"
+        f"This link expires in 1 hour and can only be used once. "
+        f"If you didn't request this, you can safely ignore this email - "
+        f"your password won't change.\n\n"
+        f"- GeoTrack, LSPU-SPCC OSAS",
+    )

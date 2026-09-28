@@ -130,6 +130,15 @@ export default function OsasLogin() {
             </button>
           </form>
 
+          {mode === "login" && (
+          <div style={{ textAlign:"center", marginTop:10 }}>
+            <button type="button" onClick={() => navigate("/osas/forgot-password")} style={{
+              background:"none", border:"none", color:"#857d6c", fontSize:12,
+              cursor:"pointer", fontFamily:"inherit", textDecoration:"underline",
+            }}>Forgot password?</button>
+          </div>
+          )}
+
           <div className="osas-login-toggle">
             {mode === "login"
               ? <span>New OSAS staff? <button type="button" onClick={() => { setMode("register"); setError(""); }}>Create an account</button></span>
