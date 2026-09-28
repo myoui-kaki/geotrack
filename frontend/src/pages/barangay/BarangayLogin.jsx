@@ -107,7 +107,7 @@ export default function BarangayLogin() {
           </div>
 
           <div className="scope-note">
-            Use the password set up by OSAS, or continue with Google.
+            This portal is for barangay officials only.
           </div>
         </div>
       </div>
