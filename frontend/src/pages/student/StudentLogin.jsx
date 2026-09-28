@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import { useAuth } from "../../context/AuthContext";
 import GoogleSignInButton from "../../components/GoogleSignInButton";
+import { STUDENT_TERMS as TERMS } from "../../components/termsText";
 import "./student.css";
 
 function getStrength(pw) {
@@ -50,35 +51,6 @@ async function geocode(address) {
   const data = await res.json();
   return data.length ? { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), displayName: data[0].display_name } : null;
 }
-
-const TERMS = `GEOTRACK - STUDENT DATA PRIVACY TERMS
-
-By creating a GeoTrack account, you agree to the following:
-
-1. INFORMATION COLLECTED
-   GeoTrack collects your full name, institutional email, course & section, gender (optional), and your off-campus boarding house location for student welfare monitoring by LSPU-SPCC OSAS.
-
-2. HOW YOUR INFORMATION IS USED
-   Your data is used solely for:
-   - Monitoring off-campus living conditions
-   - Generating aggregated statistical reports for OSAS
-   - Following up on welfare concerns you report
-   Your data will NOT be sold or shared with third parties.
-
-3. REVIEWS ARE ANONYMOUS
-   Reviews you post about boarding houses are fully anonymous. Your identity is never shown to other users or OSAS.
-
-4. LOCATION DATA
-   Your boarding house location is stored to place you on the OSAS monitoring map. Only OSAS administrators can see the student-to-location mapping.
-
-5. DATA RETENTION
-   Accounts inactive for 3 years are automatically archived. Accounts archived for 5 years are permanently deleted from the system.
-
-6. YOUR RIGHTS
-   You may update your profile at any time. To request early deletion, contact your OSAS office directly.
-
-7. CONSENT
-   By checking "I agree," you consent to the collection and use of your data as described above in accordance with Republic Act 10173 (Data Privacy Act of 2012) of the Philippines.`;
 
 export default function StudentLogin() {
   const [mode, setMode] = useState("login");
@@ -203,20 +175,6 @@ export default function StudentLogin() {
         <h1 className="form-title">{mode === "login" ? "Welcome back" : "Create your account"}</h1>
 
         {error && <div className="error-banner">{error}</div>}
-
-        <GoogleSignInButton role="student" onSuccess={handleGoogleSuccess} onError={setError} />
-        <div style={{ textAlign:"center", fontSize:10.5, color:"#a39c8a", marginTop:6 }}>
-          By continuing with Google, you agree to the{" "}
-          <button type="button" onClick={() => setTermsOpen(true)} style={{
-            background:"none", border:"none", color:"#a39c8a", textDecoration:"underline",
-            cursor:"pointer", fontSize:10.5, fontFamily:"inherit", padding:0,
-          }}>Terms &amp; Conditions</button>.
-        </div>
-        <div style={{ display:"flex", alignItems:"center", gap:10, margin:"16px 0" }}>
-          <div style={{ flex:1, height:1, background:"var(--line)" }} />
-          <span style={{ fontSize:11.5, color:"#a39c8a" }}>or use your student email</span>
-          <div style={{ flex:1, height:1, background:"var(--line)" }} />
-        </div>
 
         <form onSubmit={handleSubmit}>
           {mode === "register" && (
@@ -353,6 +311,10 @@ export default function StudentLogin() {
             {loading ? "Please wait..." : mode === "login" ? "Sign in" : "Create account"}
           </button>
         </form>
+
+        {mode === "login" && (
+          <GoogleSignInButton role="student" onSuccess={handleGoogleSuccess} onError={setError} />
+        )}
 
         <div className="student-login-toggle">
           {mode === "login"

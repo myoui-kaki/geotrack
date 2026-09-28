@@ -81,6 +81,9 @@ class GoogleAuthRequest(BaseModel):
     # barangay account (its barangay_name is already set and isn't changed
     # by signing in again).
     barangay_name: Optional[str] = None
+    # A brand-new account is only created once this is True (the person has
+    # agreed to the Terms & Conditions). Existing accounts ignore it.
+    accept_terms: bool = False
 
 
 class TokenResponse(BaseModel):
@@ -91,6 +94,11 @@ class TokenResponse(BaseModel):
     requires_otp: bool = False       # True when email OTP still needed
     requires_2fa: bool = False       # True when TOTP code still needed
     pending_token: Optional[str] = None  # short-lived token for 2FA step
+    # Google sign-in only: True means "this Google account has no GeoTrack
+    # account yet" - nothing was created and access_token is empty. The
+    # frontend shows the Terms & Conditions, then repeats the request with
+    # accept_terms=True to actually create the account.
+    requires_terms: bool = False
 
 
 class VerifyOTPRequest(BaseModel):

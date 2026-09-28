@@ -2,9 +2,10 @@
 //
 // Password sign-in is for existing accounts (still created by OSAS, scoped
 // to a barangay via barangay_name). Google sign-in/sign-up is also offered
-// here now - a brand new barangay account created that way needs the
-// barangay name typed in once (there's no other way to know which barangay
-// it represents), which is what the extra field below is for.
+// here now - a brand new barangay account created that way is asked for
+// its barangay name inside the Terms & Conditions step (see
+// GoogleSignInButton), since there's no other way to know which barangay
+// it represents.
 
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -17,7 +18,6 @@ export default function BarangayLogin() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
-  const [googleBarangayName, setGoogleBarangayName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -75,19 +75,6 @@ export default function BarangayLogin() {
 
           {error && <div className="error-banner">{error}</div>}
 
-          <div className="field">
-            <label>Barangay you represent <span style={{ color:"#a39c8a" }}>(only needed the first time)</span></label>
-            <input value={googleBarangayName} onChange={e => setGoogleBarangayName(e.target.value)}
-              placeholder="e.g. Brgy. Del Remedio" />
-          </div>
-          <GoogleSignInButton role="barangay" extra={{ barangay_name: googleBarangayName }}
-            onSuccess={handleGoogleSuccess} onError={setError} />
-          <div style={{ display:"flex", alignItems:"center", gap:10, margin:"16px 0" }}>
-            <div style={{ flex:1, height:1, background:"var(--line)" }} />
-            <span style={{ fontSize:11.5, color:"#a39c8a" }}>or use your email</span>
-            <div style={{ flex:1, height:1, background:"var(--line)" }} />
-          </div>
-
           <form onSubmit={handleSubmit}>
             <div className="field">
               <label>Email</label>
@@ -110,6 +97,8 @@ export default function BarangayLogin() {
             </button>
           </form>
 
+          <GoogleSignInButton role="barangay" onSuccess={handleGoogleSuccess} onError={setError} />
+
           <div style={{ textAlign:"center", marginTop:10 }}>
             <button type="button" onClick={() => navigate("/barangay/forgot-password")} style={{
               background:"none", border:"none", color:"#857d6c", fontSize:12,
@@ -118,7 +107,7 @@ export default function BarangayLogin() {
           </div>
 
           <div className="scope-note">
-            Have a password already set up by OSAS? Use it above - or sign in/up with Google.
+            Use the password set up by OSAS, or continue with Google.
           </div>
         </div>
       </div>

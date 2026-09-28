@@ -83,13 +83,6 @@ export default function OsasLogin() {
 
           {error && <div className="error-banner">{error}</div>}
 
-          <GoogleSignInButton role="osas" onSuccess={handleGoogleSuccess} onError={setError} />
-          <div style={{ display:"flex", alignItems:"center", gap:10, margin:"16px 0" }}>
-            <div style={{ flex:1, height:1, background:"var(--line)" }} />
-            <span style={{ fontSize:11.5, color:"#a39c8a" }}>or use your email</span>
-            <div style={{ flex:1, height:1, background:"var(--line)" }} />
-          </div>
-
           <form onSubmit={handleSubmit}>
             {mode === "register" && (
               <>
@@ -129,6 +122,10 @@ export default function OsasLogin() {
               {loading ? "Please wait..." : mode === "login" ? "Sign in" : "Create account"}
             </button>
           </form>
+
+          {mode === "login" && (
+            <GoogleSignInButton role="osas" onSuccess={handleGoogleSuccess} onError={setError} />
+          )}
 
           {mode === "login" && (
           <div style={{ textAlign:"center", marginTop:10 }}>

@@ -402,6 +402,9 @@ def google_auth_student(payload: schemas.GoogleAuthRequest, db: Session = Depend
         raise HTTPException(409, "This email is already registered under a different GeoTrack account type.")
 
     if user is None:
+        if not payload.accept_terms:
+            return schemas.TokenResponse(access_token="", role="student", requires_terms=True,
+                                         full_name=info.get("name") or email.split("@")[0])
         user = models.User(
             full_name=info.get("name") or email.split("@")[0],
             email=email, hashed_password=hash_password(secrets.token_urlsafe(32)),
@@ -427,6 +430,9 @@ def google_auth_osas(payload: schemas.GoogleAuthRequest, db: Session = Depends(g
         raise HTTPException(409, "This email is already registered under a different GeoTrack account type.")
 
     if user is None:
+        if not payload.accept_terms:
+            return schemas.TokenResponse(access_token="", role="osas_admin", requires_terms=True,
+                                         full_name=info.get("name") or email.split("@")[0])
         user = models.User(
             full_name=info.get("name") or email.split("@")[0],
             email=email, hashed_password=hash_password(secrets.token_urlsafe(32)),
@@ -451,6 +457,9 @@ def google_auth_barangay(payload: schemas.GoogleAuthRequest, db: Session = Depen
         raise HTTPException(409, "This email is already registered under a different GeoTrack account type.")
 
     if user is None:
+        if not payload.accept_terms:
+            return schemas.TokenResponse(access_token="", role="barangay", requires_terms=True,
+                                         full_name=info.get("name") or email.split("@")[0])
         barangay_name = (payload.barangay_name or "").strip()
         if not barangay_name:
             raise HTTPException(400, "Please enter which barangay this account represents.")
