@@ -79,7 +79,6 @@ export const api = {
   getToken, getRole, getFullName, setSession, clearSession, loginRequest, AuthError,
   registerStudent:  p => request("/auth/register/student", {method:"POST",body:p}),
   registerOsasAdmin:p => request("/auth/register/osas",   {method:"POST",body:p}),
-  registerBarangay: p => request("/auth/register/barangay", {method:"POST",body:p}),
   // role: "student" | "osas" | "barangay" - matches the path prefix, and
   // the backend route (/auth/google/<role>) one-to-one. extra is only ever
   // used for barangay's first-time-signup barangay_name.
@@ -118,7 +117,6 @@ export const api = {
   myEmergencies:      ()        => request("/student/sos"),
   emergencyDetail:    id        => request(`/student/sos/${id}`),
   cancelEmergency:    id        => request(`/student/sos/${id}/cancel`,{method:"PATCH"}),
-  shareSOSLocation:   (id,p)    => request(`/student/sos/${id}/location`,{method:"PATCH",body:p}),
   myNotifications:          ()  => request("/student/notifications"),
   markNotificationRead:     id  => request(`/student/notifications/${id}/read`,{method:"PATCH"}),
   markAllNotificationsRead: ()  => request("/student/notifications/read-all",{method:"PATCH"}),
@@ -176,6 +174,7 @@ export const api = {
     listBoardingHouses: () => request("/barangay/boarding-houses"),
     confirmPermit: (hid, has_barangay_permit) => request(`/barangay/boarding-houses/${hid}/permit`, {method:"PATCH", body:{has_barangay_permit}}),
     listEmergencies: () => request("/barangay/emergencies"),
+    updateEmergencyStatus: (id,p) => request(`/barangay/emergencies/${id}/status`,{method:"PATCH",body:p}),
     listConcerns: () => request("/barangay/concerns"),
     geoMapPoints: () => request("/barangay/geo-map"),
   },

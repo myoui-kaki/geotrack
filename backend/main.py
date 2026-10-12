@@ -1,3 +1,4 @@
+import re
 """
 main.py — GeoTrack API v3
 Features: 2FA, OTP email verification, audit logs, session timeout,
@@ -366,22 +367,6 @@ def resend_otp(email: str, db: Session = Depends(get_db)):
     return resp
 
 
-@app.post("/api/auth/register/barangay", response_model=schemas.TokenResponse)
-def register_barangay(payload: schemas.RegisterBarangayRequest, db: Session = Depends(get_db)):
-    if db.query(models.User).filter(models.User.email == payload.email).first():
-        raise HTTPException(400, "Email already registered.")
-    user = models.User(full_name=payload.full_name, email=payload.email,
-                       hashed_password=hash_password(payload.password),
-                       role="barangay", barangay_name=payload.barangay_name,
-                       contact_number=(payload.contact_number or "").strip() or None,
-                       is_email_verified=True)
-    db.add(user); db.commit(); db.refresh(user)
-    log_action(db, user, "create", "user", user.id, user.full_name,
-               f"Barangay account registered ({user.barangay_name})")
-    token = create_access_token({"sub": str(user.id), "role": user.role})
-    return schemas.TokenResponse(access_token=token, role=user.role, full_name=user.full_name)
-
-
 @app.post("/api/auth/register/osas", response_model=schemas.TokenResponse)
 def register_osas(payload: schemas.RegisterOsasRequest, db: Session = Depends(get_db)):
     if db.query(models.User).filter(models.User.email == payload.email).first():
@@ -473,10 +458,6 @@ def google_auth_barangay(payload: schemas.GoogleAuthRequest, db: Session = Depen
         raise HTTPException(409, "This email is already registered under a different GeoTrack account type.")
 
     if user is None:
-        try:
-            schemas.validate_gmail_email(email)
-        except ValueError as e:
-            raise HTTPException(400, str(e))
         if not payload.accept_terms:
             return schemas.TokenResponse(access_token="", role="barangay", requires_terms=True,
                                          full_name=info.get("name") or email.split("@")[0])
@@ -620,26 +601,22 @@ def reset_password(payload: schemas.ResetPasswordRequest, db: Session = Depends(
 
 
 # ─── STUDENT endpoints ────────────────────────────────────────────────────────
-def _latest_status_update(db, student_id: int):
-    return (db.query(models.StatusUpdate)
-              .filter(models.StatusUpdate.student_id == student_id)
-              .order_by(models.StatusUpdate.created_at.desc(), models.StatusUpdate.id.desc())
-              .first())
-
-
-def _profile_out(db, user) -> schemas.MyProfileOut:
-    """Profile payload incl. the current boarding house / landlord, derived
-    from the student's most recent status update (not stored on the user)."""
-    latest = _latest_status_update(db, user.id)
+@app.get("/api/student/me", response_model=schemas.MyProfileOut)
+def my_profile(db: Session = Depends(get_db), user: models.User = Depends(require_student)):
+    latest = (db.query(models.StatusUpdate)
+                .filter(models.StatusUpdate.student_id == user.id)
+                .order_by(models.StatusUpdate.created_at.desc())
+                .first())
     boarding_house_name = current_barangay = landlord_name = landlord_contact = None
     if latest:
-        if latest.boarding_house:
-            h = latest.boarding_house
-            boarding_house_name, current_barangay = h.name, h.barangay
-            landlord_name, landlord_contact = h.contact_person, h.contact_number
-        elif latest.status_type == "transferred":
+        if latest.status_type == "transferred":
             boarding_house_name = latest.new_boarding_house_name
             current_barangay = latest.new_barangay
+        elif latest.boarding_house:
+            boarding_house_name = latest.boarding_house.name
+            current_barangay = latest.boarding_house.barangay
+            landlord_name = latest.boarding_house.contact_person
+            landlord_contact = latest.boarding_house.contact_number
     return schemas.MyProfileOut(
         id=user.id, full_name=user.full_name, email=user.email,
         course_section=user.course_section, gender=user.gender,
@@ -648,95 +625,15 @@ def _profile_out(db, user) -> schemas.MyProfileOut:
         landlord_name=landlord_name, landlord_contact=landlord_contact,
     )
 
-
-@app.get("/api/student/me", response_model=schemas.MyProfileOut)
-def my_profile(db: Session = Depends(get_db), user: models.User = Depends(require_student)):
-    return _profile_out(db, user)
-
-
 @app.put("/api/student/me", response_model=schemas.MyProfileOut)
 def update_profile(payload: schemas.MyProfileUpdate, db: Session = Depends(get_db),
                    user: models.User = Depends(require_student)):
     old_name = user.full_name
-    data = payload.dict(exclude_unset=True)
-
-    bh_name = (data.pop("boarding_house_name", None) or "").strip()
-    bh_brgy = (data.pop("boarding_house_barangay", None) or "").strip()
-    has_ll_name = "landlord_name" in data
-    has_ll_contact = "landlord_contact" in data
-    ll_name = (data.pop("landlord_name", None) or "").strip() or None
-    ll_contact = (data.pop("landlord_contact", None) or "").strip() or None
-
-    if bool(bh_name) != bool(bh_brgy):
-        raise HTTPException(400, "Enter both the boarding house name and its barangay.")
-
-    for f, v in data.items(): setattr(user, f, v)
-
-    latest = _latest_status_update(db, user.id)
-    cur = latest.boarding_house if (latest and latest.boarding_house) else None
-    old_ll_name = cur.contact_person if cur else None
-    old_ll_contact = cur.contact_number if cur else None
-    target = cur
-    changes = []
-
-    if bh_name:
-        same_place = bool(cur) and cur.name.strip().lower() == bh_name.lower() and _same_brgy(cur.barangay, bh_brgy)
-        if not same_place:
-            only_mine = (
-                cur is not None and not cur.is_verified and cur.submitted_by_id == user.id
-                and db.query(models.StatusUpdate).filter(
-                    models.StatusUpdate.boarding_house_id == cur.id,
-                    models.StatusUpdate.student_id != user.id).count() == 0
-            )
-            if only_mine:
-                # Nobody else lives there and it isn't verified yet - this is
-                # the student correcting their own record, so edit it in place.
-                if not _same_brgy(cur.barangay, bh_brgy):
-                    cur.latitude = cur.longitude = None   # old pin no longer applies
-                changes.append(f"Boarding house: {cur.name} ({cur.barangay}) -> {bh_name} ({bh_brgy})")
-                cur.name, cur.barangay = bh_name, bh_brgy
-                if latest.status_type == "transferred":
-                    latest.new_boarding_house_name, latest.new_barangay = bh_name, bh_brgy
-                target = cur
-            else:
-                # Moving to a different house: link (or create) it and record
-                # the move as a new status update so history stays intact.
-                house = next((h for h in db.query(models.BoardingHouse).all()
-                              if h.name.strip().lower() == bh_name.lower() and _same_brgy(h.barangay, bh_brgy)), None)
-                if not house:
-                    house = models.BoardingHouse(
-                        name=bh_name, barangay=bh_brgy, is_verified=False,
-                        submitted_by=f"Student — {user.full_name}", submitted_by_id=user.id)
-                    db.add(house); db.flush()
-                db.add(models.StatusUpdate(
-                    student_id=user.id, boarding_house_id=house.id,
-                    status_type="transferred" if cur else "same",
-                    new_boarding_house_name=bh_name if cur else None,
-                    new_barangay=bh_brgy if cur else None,
-                    note="Updated from profile",
-                    month_label=datetime.utcnow().strftime("%B %Y")))
-                changes.append(f"Boarding house: {cur.name if cur else 'none'} -> {bh_name} ({bh_brgy})")
-                target = house
-
-    wants_landlord = (has_ll_name and ll_name) or (has_ll_contact and ll_contact)
-    if target is None and wants_landlord:
-        raise HTTPException(400, "Add your boarding house first before saving landlord details.")
-    if target is not None:
-        # When the student switched to a house that already exists, the form's
-        # landlord fields are still the OLD house's values - don't copy those
-        # over the new house's own landlord info.
-        switched = target is not cur
-        if has_ll_name and not (switched and ll_name == old_ll_name) and ll_name != target.contact_person:
-            changes.append("Landlord name updated"); target.contact_person = ll_name
-        if has_ll_contact and not (switched and ll_contact == old_ll_contact) and ll_contact != target.contact_number:
-            changes.append("Landlord contact updated"); target.contact_number = ll_contact
-
+    for f, v in payload.dict(exclude_unset=True).items(): setattr(user, f, v)
     db.commit(); db.refresh(user)
-    detail = f"Profile updated (was: {old_name})" if old_name != user.full_name else "Profile updated"
-    if changes:
-        detail += " | " + "; ".join(changes)
-    log_action(db, user, "update", "user", user.id, user.full_name, detail)
-    return _profile_out(db, user)
+    log_action(db, user, "update", "user", user.id, user.full_name,
+               f"Profile updated (was: {old_name})" if old_name != user.full_name else "Profile updated")
+    return user
 
 @app.get("/api/student/boarding-houses", response_model=List[schemas.BoardingHouseOut])
 def student_list_bh(db: Session = Depends(get_db), user: models.User = Depends(require_student)):
@@ -858,38 +755,9 @@ def submit_status(
 
         db.add(existing)
 
-    # "transferred" used to only ever store the typed name/barangay as free
-    # text on the StatusUpdate row, with boarding_house_id left null - which
-    # meant /api/student/my-boarding-house (which only looks at updates that
-    # DO have a boarding_house_id) could never find it, so the map stayed
-    # empty forever even after a fully correct, successful submission. Now
-    # it finds-or-creates the BoardingHouse record, same as registration
-    # does, and links it.
-    linked_boarding_house_id = payload.boarding_house_id
-    if payload.status_type == "transferred":
-        house = db.query(models.BoardingHouse).filter(
-            models.BoardingHouse.name == payload.new_boarding_house_name).first()
-        if not house:
-            house = models.BoardingHouse(
-                name=payload.new_boarding_house_name,
-                barangay=payload.new_barangay,
-                latitude=payload.new_boarding_house_latitude,
-                longitude=payload.new_boarding_house_longitude,
-                is_verified=False, submitted_by=f"Student — {user.full_name}",
-                submitted_by_id=user.id,
-            )
-            db.add(house); db.commit(); db.refresh(house)
-        elif payload.new_boarding_house_latitude is not None and house.latitude is None:
-            # Fill in coordinates for an existing unpinned record rather
-            # than overwrite one that's already been located.
-            house.latitude = payload.new_boarding_house_latitude
-            house.longitude = payload.new_boarding_house_longitude
-            db.commit()
-        linked_boarding_house_id = house.id
-
     update = models.StatusUpdate(
         student_id=user.id,
-        boarding_house_id=linked_boarding_house_id,
+        boarding_house_id=payload.boarding_house_id,
         status_type=payload.status_type,
         new_boarding_house_name=payload.new_boarding_house_name,
         new_barangay=payload.new_barangay,
@@ -1064,7 +932,7 @@ def trigger_sos(payload: schemas.SOSCreate, db: Session = Depends(get_db),
     current_barangay = _student_current_barangay(db, user.id)
     if current_barangay:
         barangay_accounts = [b for b in db.query(models.User).filter(models.User.role == "barangay").all()
-                             if _same_brgy(b.barangay_name, current_barangay)]
+                             if _same_barangay(b.barangay_name, current_barangay)]
         if barangay_accounts:
             notify_all(db, [b.id for b in barangay_accounts], "sos_alert", f"SOS: {payload.category}",
                        f"{user.full_name} (in {current_barangay}) triggered an SOS alert ({payload.category}).")
@@ -1084,28 +952,6 @@ def my_emergency_detail(case_id: int, db: Session = Depends(get_db),
                         user: models.User = Depends(require_student)):
     case = db.query(models.EmergencyCase).get(case_id)
     if not case or case.student_id != user.id: raise HTTPException(404, "Not found")
-    return _emergency_out(case)
-
-@app.patch("/api/student/sos/{case_id}/location", response_model=schemas.EmergencyCaseOut)
-def share_sos_location(case_id: int, payload: schemas.SOSLocationUpdate, db: Session = Depends(get_db),
-                       user: models.User = Depends(require_student)):
-    """Student chooses to share (or refresh) their location on an open alert,
-    so OSAS and the student's barangay can see where they are."""
-    case = db.query(models.EmergencyCase).get(case_id)
-    if not case or case.student_id != user.id: raise HTTPException(404, "Not found")
-    if case.status in ("Resolved", "Cancelled"): raise HTTPException(400, "Case already closed")
-    case.latitude, case.longitude = payload.latitude, payload.longitude
-    db.commit()
-    _log_timeline(db, case, user, "Location shared", f"{payload.latitude:.5f}, {payload.longitude:.5f}")
-    log_action(db, user, "update", "emergency", case.id, case.category, "Student shared location")
-    recipients = [a.id for a in db.query(models.User).filter(models.User.role == "osas_admin").all()]
-    brgy = _student_current_barangay(db, user.id)
-    if brgy:
-        recipients += [b.id for b in db.query(models.User).filter(models.User.role == "barangay").all()
-                       if _same_brgy(b.barangay_name, brgy)]
-    notify_all(db, recipients, "sos_alert", f"SOS location: {case.category}",
-               f"{user.full_name} shared their location for an active SOS alert.")
-    db.refresh(case)
     return _emergency_out(case)
 
 @app.patch("/api/student/sos/{case_id}/cancel", response_model=schemas.EmergencyCaseOut)
@@ -1368,15 +1214,16 @@ def barangay_update_profile(payload: schemas.BarangayProfileUpdate, db: Session 
 
 @app.get("/api/barangay/boarding-houses", response_model=List[schemas.BoardingHouseOut])
 def barangay_list_bh(db: Session = Depends(get_db), user: models.User = Depends(require_barangay)):
-    return [h for h in db.query(models.BoardingHouse).all()
-            if _same_brgy(h.barangay, user.barangay_name)]
+    return (db.query(models.BoardingHouse)
+              .filter(models.BoardingHouse.barangay == user.barangay_name)
+              .all())
 
 @app.patch("/api/barangay/boarding-houses/{hid}/permit", response_model=schemas.BoardingHouseOut)
 def barangay_confirm_permit(hid: int, payload: schemas.BarangayPermitUpdate,
                              db: Session = Depends(get_db), user: models.User = Depends(require_barangay)):
     h = db.query(models.BoardingHouse).get(hid)
     if not h: raise HTTPException(404, "Not found")
-    if not _same_brgy(h.barangay, user.barangay_name):
+    if h.barangay != user.barangay_name:
         raise HTTPException(403, "This boarding house is outside your barangay.")
     h.has_barangay_permit = payload.has_barangay_permit
     # The barangay's own permit confirmation is what actually grants
@@ -1410,7 +1257,7 @@ def barangay_geo_map(db: Session = Depends(get_db), user: models.User = Depends(
         if not u or not u.boarding_house: continue
         h = u.boarding_house
         if h.latitude is None: continue
-        if not _same_brgy(h.barangay, user.barangay_name): continue
+        if h.barangay != user.barangay_name: continue
         points.append(schemas.StudentMapPoint(student_name=s.full_name, boarding_house_name=h.name,
                                               barangay=h.barangay, latitude=h.latitude,
                                               longitude=h.longitude, is_flagged=u.is_flagged))
@@ -1421,19 +1268,44 @@ def barangay_emergencies(db: Session = Depends(get_db), user: models.User = Depe
     cases = (db.query(models.EmergencyCase)
                .order_by(models.EmergencyCase.created_at.desc())
                .all())
-    # Open cases first (that's what the barangay needs to act on), then history.
-    mine = [c for c in cases if _same_brgy(_student_current_barangay(db, c.student_id), user.barangay_name)]
-    mine.sort(key=lambda c: 0 if c.status in ("Active", "Responding") else 1)
-    return [_emergency_out(c) for c in mine]
+    out = []
+    for c in cases:
+        b = _student_current_barangay(db, c.student_id)
+        # An SOS from a student with no known barangay is shown to every
+        # barangay account - in an emergency it is better seen than missed.
+        if b is None or _same_barangay(b, user.barangay_name):
+            out.append(_emergency_out(c))
+    return out
+
+@app.patch("/api/barangay/emergencies/{case_id}/status", response_model=schemas.EmergencyCaseOut)
+def barangay_update_emergency(case_id: int, payload: schemas.EmergencyStatusUpdate,
+                              db: Session = Depends(get_db), user: models.User = Depends(require_barangay)):
+    if payload.status not in ("Responding", "Resolved"):
+        raise HTTPException(400, "Barangay can only set Responding or Resolved")
+    case = db.query(models.EmergencyCase).get(case_id)
+    if not case: raise HTTPException(404, "Not found")
+    b = _student_current_barangay(db, case.student_id)
+    if b is not None and not _same_barangay(b, user.barangay_name):
+        raise HTTPException(403, "This case is outside your barangay.")
+    if case.status == "Cancelled":
+        raise HTTPException(400, "This SOS was cancelled by the student.")
+    case.status = payload.status
+    if payload.status == "Resolved": case.resolved_at = datetime.utcnow()
+    db.commit()
+    _log_timeline(db, case, user, f"Status: {payload.status} (Barangay)", payload.note)
+    log_action(db, user, "update", "emergency", case.id,
+               case.student.full_name if case.student else None, f"Barangay status \u2192 {payload.status}")
+    osas = db.query(models.User).filter(models.User.role == "osas_admin").all()
+    notify_all(db, [a.id for a in osas], "sos_alert", f"SOS {payload.status}",
+               f"{user.barangay_name} marked {case.student.full_name if case.student else 'a'} SOS as {payload.status}.")
+    notify(db, case.student_id, "sos_alert", f"SOS {payload.status}",
+           f"{user.barangay_name} marked your SOS as {payload.status}.")
+    db.refresh(case)
+    return _emergency_out(case)
 
 @app.get("/api/barangay/concerns", response_model=List[schemas.ConcernAdminOut])
 def barangay_concerns(db: Session = Depends(get_db), user: models.User = Depends(require_barangay)):
-    # A new concern ("open") is OSAS's to look at first. It only shows up here
-    # once OSAS has opened/activated it (status moved to in_progress or
-    # resolved), which is how OSAS forwards it to the barangay.
-    concerns = (db.query(models.Concern)
-                  .filter(models.Concern.status != "open")
-                  .order_by(models.Concern.created_at.desc()).all())
+    concerns = db.query(models.Concern).order_by(models.Concern.created_at.desc()).all()
     return [schemas.ConcernAdminOut(
                 id=c.id, category=c.category, details=c.details, status=c.status,
                 created_at=c.created_at, photo_data_url=c.photo_data_url,
@@ -1441,7 +1313,7 @@ def barangay_concerns(db: Session = Depends(get_db), user: models.User = Depends
                 student_name=c.student.full_name if c.student else "Unknown",
                 student_email=c.student.email if c.student else "",
             ) for c in concerns
-            if _same_brgy(_student_current_barangay(db, c.student_id), user.barangay_name)]
+            if _same_barangay(_student_current_barangay(db, c.student_id), user.barangay_name)]
 
 @app.get("/api/osas/boarding-houses/{hid}/reviews", response_model=List[schemas.ReviewOut])
 def bh_reviews(hid: int, db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
@@ -1462,17 +1334,7 @@ def update_concern(cid: int, new_status: str, db: Session = Depends(get_db),
     if new_status not in ("open","in_progress","resolved"): raise HTTPException(400,"Invalid")
     c = db.query(models.Concern).get(cid)
     if not c: raise HTTPException(404, "Not found")
-    was_open = c.status == "open"
     c.status = new_status; db.commit()
-    if was_open and new_status != "open":
-        # OSAS just opened/activated it -> forward to the student's barangay.
-        brgy = _student_current_barangay(db, c.student_id)
-        if brgy:
-            accounts = [b for b in db.query(models.User).filter(models.User.role == "barangay").all()
-                        if _same_brgy(b.barangay_name, brgy)]
-            notify_all(db, [b.id for b in accounts], "concern_forwarded",
-                       f"Concern forwarded by OSAS: {c.category}",
-                       f"OSAS opened a concern from {c.student.full_name if c.student else 'a student'} in {brgy}.")
     if new_status == "resolved" and c.student_id:
         notify(db, c.student_id, "resolution", "Your concern was resolved",
                f"Your reported concern ({c.category}) has been marked resolved by OSAS.")
@@ -1545,13 +1407,33 @@ def update_osas_account(aid: int, payload: schemas.OsasAccountUpdate,
     log_action(db, user, "update", "osas_account", aid, a.full_name, "Account updated")
     return a
 
+def _purge_user_refs(db: Session, u: models.User):
+    """Clear every row that points at this user so the DELETE can't hit a
+    foreign-key violation (the cause of the 'Failed to fetch' on Postgres)."""
+    uid = u.id
+    db.query(models.AuditLog).filter(models.AuditLog.actor_id == uid).update({"actor_id": None})
+    db.query(models.BoardingHouse).filter(models.BoardingHouse.submitted_by_id == uid).update({"submitted_by_id": None})
+    db.query(models.Notification).filter(models.Notification.user_id == uid).delete()
+    db.query(models.PasswordResetToken).filter(models.PasswordResetToken.user_id == uid).delete()
+    db.query(models.StudentFlag).filter(models.StudentFlag.student_id == uid).delete()
+    db.query(models.StudentCompliance).filter(models.StudentCompliance.student_id == uid).delete()
+    for c in db.query(models.EmergencyCase).filter(models.EmergencyCase.student_id == uid).all():
+        db.delete(c)
+    db.flush()
+
 @app.delete("/api/osas/accounts/{aid}")
 def delete_osas_account(aid: int, db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
     if aid == user.id: raise HTTPException(400, "Cannot delete your own account.")
     a = db.query(models.User).filter(models.User.id == aid, models.User.role == "osas_admin").first()
     if not a: raise HTTPException(404, "Not found")
-    log_action(db, user, "delete", "osas_account", aid, a.full_name, "OSAS account deleted")
-    db.delete(a); db.commit()
+    label = a.full_name
+    try:
+        _purge_user_refs(db, a)
+        db.delete(a); db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"Could not delete account: {e.__class__.__name__}")
+    log_action(db, user, "delete", "osas_account", aid, label, "OSAS account deleted")
     return {"message": "Deleted"}
 
 @app.get("/api/osas/students", response_model=List[schemas.StudentAccountOut])
@@ -1632,8 +1514,14 @@ def announcement_history(db: Session = Depends(get_db), user: models.User = Depe
 def delete_student(sid: int, db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
     s = db.query(models.User).filter(models.User.id == sid, models.User.role == "student").first()
     if not s: raise HTTPException(404, "Not found")
-    log_action(db, user, "delete", "student", sid, s.full_name, "Student account deleted")
-    db.delete(s); db.commit()
+    label = s.full_name
+    try:
+        _purge_user_refs(db, s)
+        db.delete(s); db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"Could not delete account: {e.__class__.__name__}")
+    log_action(db, user, "delete", "student", sid, label, "Student account deleted")
     return {"message": "Deleted"}
 
 @app.get("/api/osas/audit-logs", response_model=List[schemas.AuditLogOut])
@@ -1653,29 +1541,30 @@ def get_audit_logs(
 # regardless of what OSAS or a student submits.
 PARTICIPATING_BARANGAYS = {"Brgy. Del Remedio"}
 
+def _norm_brgy(name: Optional[str]) -> str:
+    """'Brgy. Del Remedio' / 'Barangay del remedio' / 'Del Remedio' -> 'del remedio'."""
+    n = (name or "").lower().replace(".", " ")
+    for w in ("barangay", "brgy", "bgy"):
+        n = re.sub(r"\b%s\b" % w, " ", n)
+    return " ".join(n.split())
+
 def _student_current_barangay(db, student_id: int) -> Optional[str]:
-    """A student's most recently known boarding house barangay, or None."""
-    u = (db.query(models.StatusUpdate)
-           .filter(models.StatusUpdate.student_id == student_id)
-           .order_by(models.StatusUpdate.created_at.desc(), models.StatusUpdate.id.desc())
-           .first())
-    if not u: return None
-    if u.status_type == "transferred": return u.new_barangay
-    if u.boarding_house: return u.boarding_house.barangay
+    """A student's most recently known boarding-house barangay, or None.
+    Walks back through status updates until one actually names a barangay,
+    so a later 'same' update without a linked house doesn't hide it."""
+    updates = (db.query(models.StatusUpdate)
+                 .filter(models.StatusUpdate.student_id == student_id)
+                 .order_by(models.StatusUpdate.created_at.desc(), models.StatusUpdate.id.desc())
+                 .all())
+    for u in updates:
+        if u.status_type == "transferred" and u.new_barangay:
+            return u.new_barangay
+        if u.boarding_house and u.boarding_house.barangay:
+            return u.boarding_house.barangay
     return None
 
-def _norm_brgy(name: Optional[str]) -> str:
-    """'Brgy. Del Remedio', 'Barangay del remedio' and 'Del Remedio' are all the
-    same place - students type this field freely, so compare it loosely."""
-    s = (name or "").lower().strip()
-    s = re.sub(r"^(barangay|brgy)\.?\s*", "", s)
-    return re.sub(r"[^a-z0-9]+", " ", s).strip()
-
-
-def _same_brgy(a: Optional[str], b: Optional[str]) -> bool:
-    na, nb = _norm_brgy(a), _norm_brgy(b)
-    return bool(na) and na == nb
-
+def _same_barangay(a: Optional[str], b: Optional[str]) -> bool:
+    return bool(a) and bool(b) and _norm_brgy(a) == _norm_brgy(b)
 
 # Course code (the letters at the start of course_section, e.g. "BSIT-3A" -> "BSIT")
 # to college/department. Add or edit entries here as needed for your campus.
