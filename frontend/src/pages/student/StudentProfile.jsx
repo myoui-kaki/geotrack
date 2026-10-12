@@ -15,24 +15,42 @@ export default function StudentProfile() {
   const [fullName, setFullName] = useState("");
   const [courseSection, setCourseSection] = useState("");
   const [gender, setGender] = useState("");
+  const [bhName, setBhName] = useState("");
+  const [bhBarangay, setBhBarangay] = useState("");
+  const [landlordName, setLandlordName] = useState("");
+  const [landlordContact, setLandlordContact] = useState("");
   const [saving, setSaving] = useState(false);
+
+  function fillForm(d) {
+    setFullName(d.full_name); setCourseSection(d.course_section||""); setGender(d.gender||"");
+    setBhName(d.current_boarding_house||""); setBhBarangay(d.current_barangay||"");
+    setLandlordName(d.landlord_name||""); setLandlordContact(d.landlord_contact||"");
+  }
 
   useEffect(() => { load(); }, []);
 
   function load() {
     setLoading(true);
     api.student.myProfile()
-      .then(d => { setProfile(d); setFullName(d.full_name); setCourseSection(d.course_section||""); setGender(d.gender||""); })
+      .then(d => { setProfile(d); fillForm(d); })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
   }
 
   async function handleSave(e) {
     e.preventDefault();
-    setSaving(true); setError(""); setSuccess("");
+    setError(""); setSuccess("");
+    if (!!bhName.trim() !== !!bhBarangay.trim()) {
+      setError("Enter both the boarding house name and its barangay."); return;
+    }
+    setSaving(true);
     try {
-      const updated = await api.student.updateMyProfile({ full_name:fullName, course_section:courseSection, gender:gender||null });
-      setProfile(updated);
+      const body = { full_name:fullName, course_section:courseSection, gender:gender||null,
+                     landlord_name:landlordName.trim()||null, landlord_contact:landlordContact.trim()||null };
+      // Only send the house when filled in - it can be changed, not removed here.
+      if (bhName.trim()) { body.boarding_house_name = bhName.trim(); body.boarding_house_barangay = bhBarangay.trim(); }
+      const updated = await api.student.updateMyProfile(body);
+      setProfile(updated); fillForm(updated);
       updateFullName(updated.full_name);   // update nav/home immediately
       setEditing(false); setSuccess("Profile updated.");
     } catch(err) { setError(err.message); }
@@ -116,9 +134,19 @@ export default function StudentProfile() {
                   <option value="female">Female</option>
                 </select>
               </div>
+              <div style={{fontSize:11.5,fontWeight:700,color:"#544f43",margin:"6px 0 10px",textTransform:"uppercase",letterSpacing:".03em"}}>
+                Boarding house &amp; landlord
+              </div>
+              <div className="field"><label>Boarding house</label><input value={bhName} onChange={e=>setBhName(e.target.value)} placeholder="e.g. Sto. Niño Lodge" /></div>
+              <div className="field"><label>Barangay</label><input value={bhBarangay} onChange={e=>setBhBarangay(e.target.value)} placeholder="e.g. Brgy. Del Remedio" /></div>
+              <div className="field"><label>Landlord name</label><input value={landlordName} onChange={e=>setLandlordName(e.target.value)} placeholder="Optional" /></div>
+              <div className="field"><label>Landlord contact number</label><input value={landlordContact} onChange={e=>setLandlordContact(e.target.value)} placeholder="Optional" /></div>
+              <p style={{fontSize:11,color:"#857d6c",margin:"-6px 0 14px"}}>
+                Changing the boarding house to a different place is recorded as a transfer. Location pins are set from the monthly update.
+              </p>
               <div className="pill-row">
                 <button className="btn primary" disabled={saving}>{saving?"Saving...":"Save changes"}</button>
-                <button type="button" className="btn" onClick={() => setEditing(false)}>Cancel</button>
+                <button type="button" className="btn" onClick={() => { fillForm(profile); setEditing(false); }}>Cancel</button>
               </div>
             </form>
           </div>

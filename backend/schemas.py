@@ -1,6 +1,6 @@
 """schemas.py — Pydantic request/response shapes for GeoTrack."""
 import re
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional, Literal, List
 from datetime import datetime
 from typing import Optional
@@ -57,6 +57,41 @@ class RegisterStudentRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def check_strength(cls, v): return validate_strong_password(v)
+
+
+def validate_gmail_email(v: str) -> str:
+    """Barangay accounts are not tied to a school domain the way students
+    are, so they sign up with a personal/official Gmail address instead.
+    Shared by password registration and Google sign-up (main.py)."""
+    v = str(v).lower().strip()
+    if not v.endswith("@gmail.com"):
+        raise ValueError("Barangay accounts must use a Gmail address (name@gmail.com).")
+    return v
+
+
+class RegisterBarangayRequest(BaseModel):
+    full_name: str
+    email: EmailStr
+    password: str
+    barangay_name: str
+    contact_number: Optional[str] = None
+
+    @field_validator("email")
+    @classmethod
+    def check_gmail(cls, v: str) -> str:
+        return validate_gmail_email(v)
+
+    @field_validator("password")
+    @classmethod
+    def check_strength(cls, v): return validate_strong_password(v)
+
+    @field_validator("full_name", "barangay_name")
+    @classmethod
+    def not_blank(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("This field is required.")
+        return v
 
 
 class RegisterOsasRequest(BaseModel):
@@ -204,6 +239,11 @@ class StatusUpdateCreate(BaseModel):
     boarding_house_id: Optional[int] = None
     new_boarding_house_name: Optional[str] = None
     new_barangay: Optional[str] = None
+    # Coordinates the student pinned on the map when transferring - used to
+    # find-or-create the BoardingHouse record so it actually shows up on
+    # their own home map (and on OSAS/Barangay's maps too).
+    new_boarding_house_latitude: Optional[float] = None
+    new_boarding_house_longitude: Optional[float] = None
     note: Optional[str] = None
     month_label: str
     photo_data_url: Optional[str] = None
@@ -293,6 +333,13 @@ class MyProfileUpdate(BaseModel):
     full_name: Optional[str] = None
     course_section: Optional[str] = None
     gender: Optional[Literal["male", "female", "prefer_not_to_say"]] = None
+    # Boarding house + landlord are editable from the profile too. name and
+    # barangay have to be sent together; the landlord fields can be sent as
+    # null/"" to clear them.
+    boarding_house_name: Optional[str] = None
+    boarding_house_barangay: Optional[str] = None
+    landlord_name: Optional[str] = None
+    landlord_contact: Optional[str] = None
 
 
 # ─── Tally report ─────────────────────────────────────────────────────────────
@@ -392,6 +439,10 @@ class SOSCreate(BaseModel):
     details: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+
+class SOSLocationUpdate(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
 
 class EmergencyStatusUpdate(BaseModel):
     status: str

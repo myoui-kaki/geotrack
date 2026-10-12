@@ -1,0 +1,1298 @@
+diff -ruN a/frontend/src/api/client.js b/frontend/src/api/client.js
+--- a/frontend/src/api/client.js	2026-10-07 10:58:24.235953058 +0000
++++ b/frontend/src/api/client.js	2026-10-07 15:59:37.398626623 +0000
+@@ -79,6 +79,7 @@
+   getToken, getRole, getFullName, setSession, clearSession, loginRequest, AuthError,
+   registerStudent:  p => request("/auth/register/student", {method:"POST",body:p}),
+   registerOsasAdmin:p => request("/auth/register/osas",   {method:"POST",body:p}),
++  registerBarangay: p => request("/auth/register/barangay", {method:"POST",body:p}),
+   // role: "student" | "osas" | "barangay" - matches the path prefix, and
+   // the backend route (/auth/google/<role>) one-to-one. extra is only ever
+   // used for barangay's first-time-signup barangay_name.
+@@ -117,6 +118,7 @@
+   myEmergencies:      ()        => request("/student/sos"),
+   emergencyDetail:    id        => request(`/student/sos/${id}`),
+   cancelEmergency:    id        => request(`/student/sos/${id}/cancel`,{method:"PATCH"}),
++  shareSOSLocation:   (id,p)    => request(`/student/sos/${id}/location`,{method:"PATCH",body:p}),
+   myNotifications:          ()  => request("/student/notifications"),
+   markNotificationRead:     id  => request(`/student/notifications/${id}/read`,{method:"PATCH"}),
+   markAllNotificationsRead: ()  => request("/student/notifications/read-all",{method:"PATCH"}),
+diff -ruN a/frontend/src/components/CalendarPopover.jsx b/frontend/src/components/CalendarPopover.jsx
+--- a/frontend/src/components/CalendarPopover.jsx	1970-01-01 00:00:00.000000000 +0000
++++ b/frontend/src/components/CalendarPopover.jsx	2026-10-07 15:59:37.444195146 +0000
+@@ -0,0 +1,72 @@
++// src/components/CalendarPopover.jsx
++//
++// Floating panel for the month calendar. It is rendered into document.body
++// (a portal) and positioned with position:fixed from the trigger button's
++// on-screen rect. The old version was an absolutely-positioned child inside
++// the form card, so it could get clipped by scrolling/overflow containers,
++// painted underneath later cards (every .card is its own stacking context
++// because of its fade-in animation), and picked up the form's global
++// ".field select" styles. Out here none of that applies.
++//
++// Usage:
++//   const btnRef = useRef(null);
++//   <button ref={btnRef} onClick={() => setOpen(v => !v)}>...</button>
++//   <CalendarPopover open={open} onClose={() => setOpen(false)} anchorRef={btnRef}>
++//     <MonthCalendar ... />
++//   </CalendarPopover>
++
++import { useEffect, useLayoutEffect, useRef, useState } from "react";
++import { createPortal } from "react-dom";
++
++export default function CalendarPopover({ open, onClose, anchorRef, children, width = 340 }) {
++  const panelRef = useRef(null);
++  const [pos, setPos] = useState(null);
++
++  function place() {
++    const a = anchorRef?.current;
++    if (!a) return;
++    const r = a.getBoundingClientRect();
++    const vw = window.innerWidth;
++    const vh = window.innerHeight;
++    const w = Math.min(width, vw - 16);
++    const left = Math.min(Math.max(8, r.left), vw - w - 8);
++    const h = panelRef.current?.offsetHeight || 380;
++    let top = r.bottom + 6;
++    if (top + h > vh - 8) top = Math.max(8, r.top - h - 6);   // flip above if no room below
++    setPos({ top, left, width: w });
++  }
++
++  useLayoutEffect(() => { if (open) place(); /* eslint-disable-next-line */ }, [open, children]);
++
++  useEffect(() => {
++    if (!open) return;
++    const onKey = (e) => { if (e.key === "Escape") onClose(); };
++    window.addEventListener("resize", place);
++    window.addEventListener("scroll", place, true);
++    window.addEventListener("keydown", onKey);
++    return () => {
++      window.removeEventListener("resize", place);
++      window.removeEventListener("scroll", place, true);
++      window.removeEventListener("keydown", onKey);
++    };
++    // eslint-disable-next-line
++  }, [open]);
++
++  if (!open) return null;
++
++  return createPortal(
++    <>
++      <div onClick={onClose} style={{ position:"fixed", inset:0, zIndex:2000, background:"rgba(28,43,36,.22)" }} />
++      <div ref={panelRef} role="dialog" aria-label="Choose month" style={{
++        position:"fixed", top: pos ? pos.top : 0, left: pos ? pos.left : 0,
++        width: pos ? pos.width : width, zIndex:2001, visibility: pos ? "visible" : "hidden",
++        background:"#fff", border:"1px solid var(--line)", borderRadius:12,
++        boxShadow:"0 12px 32px rgba(28,43,36,.28)", padding:12,
++        maxHeight:"calc(100vh - 16px)", overflowY:"auto",
++      }}>
++        {children}
++      </div>
++    </>,
++    document.body
++  );
++}
+diff -ruN a/frontend/src/components/MonthCalendar.jsx b/frontend/src/components/MonthCalendar.jsx
+--- a/frontend/src/components/MonthCalendar.jsx	2026-10-07 10:58:24.236349823 +0000
++++ b/frontend/src/components/MonthCalendar.jsx	2026-10-07 15:59:37.444789381 +0000
+@@ -55,7 +55,7 @@
+   while (cells.length % 7 !== 0) cells.push(null);
+ 
+   return (
+-    <div style={{ background:"#fff", border:"1px solid var(--line)", borderRadius:12, padding:14, minWidth:280 }}>
++    <div style={{ background:"#fff", border:"1px solid var(--line)", borderRadius:12, padding:14, minWidth:0 }}>
+       <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12, flexWrap:"wrap" }}>
+         <select value={year} onChange={(e) => onSelect(parseInt(e.target.value), month)}
+           style={{ fontSize:12.5, padding:"5px 6px" }}>
+diff -ruN a/frontend/src/pages/barangay/BarangayConcerns.jsx b/frontend/src/pages/barangay/BarangayConcerns.jsx
+--- a/frontend/src/pages/barangay/BarangayConcerns.jsx	2026-10-07 10:58:24.236684841 +0000
++++ b/frontend/src/pages/barangay/BarangayConcerns.jsx	2026-10-08 03:35:37.987232429 +0000
+@@ -13,10 +13,14 @@
+   const [expandedId, setExpandedId] = useState(null);
+ 
+   useEffect(() => {
+-    api.barangay.listConcerns()
+-      .then(setConcerns)
+-      .catch(err => setError(err.message))
+-      .finally(() => setLoading(false));
++    let alive = true;
++    const load = (silent) => api.barangay.listConcerns()
++      .then(d => { if (alive) { setConcerns(d); setError(""); } })
++      .catch(err => { if (alive && !silent) setError(err.message); })
++      .finally(() => { if (alive && !silent) setLoading(false); });
++    load(false);
++    const t = setInterval(() => { if (document.visibilityState === "visible") load(true); }, 15000);
++    return () => { alive = false; clearInterval(t); };
+   }, []);
+ 
+   return (
+@@ -25,8 +29,8 @@
+         <div>
+           <div className="osas-main-title">Reported concerns</div>
+           <div className="osas-main-sub">
+-            Concerns filed by students currently boarding in your barangay, including any photo
+-            documentation and amenities checklist they attached.
++            Concerns from students currently boarding in your barangay that OSAS has opened and
++            forwarded to you, including any photo documentation and amenities checklist they attached.
+           </div>
+         </div>
+       </div>
+@@ -35,7 +39,7 @@
+ 
+       <div className="card">
+         {loading ? <div className="loading-text">Loading...</div>
+-        : concerns.length === 0 ? <div className="review-empty">No reported concerns from your barangay yet.</div>
++        : concerns.length === 0 ? <div className="review-empty">No concerns forwarded by OSAS yet. A student's concern appears here once OSAS opens it.</div>
+         : concerns.map(c => (
+             <div key={c.id} style={{ padding:"12px 0", borderBottom:"1px solid #ece7da" }}>
+               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+@@ -45,7 +49,7 @@
+                     {c.student_name} - {new Date(c.created_at).toLocaleString()}
+                   </span>
+                 </div>
+-                <span className={`badge ${c.status === "resolved" ? "ok" : "pending"}`}>{c.status}</span>
++                <span className={`badge ${c.status === "resolved" ? "ok" : "pending"}`}>{c.status === "in_progress" ? "active" : c.status}</span>
+               </div>
+               <p style={{ fontSize:12.5, color:"#544f43", marginTop:6 }}>{c.details}</p>
+               {(c.photo_data_url || c.amenities_checklist) && (
+diff -ruN a/frontend/src/pages/barangay/BarangayEmergencies.jsx b/frontend/src/pages/barangay/BarangayEmergencies.jsx
+--- a/frontend/src/pages/barangay/BarangayEmergencies.jsx	2026-10-07 10:58:24.236702394 +0000
++++ b/frontend/src/pages/barangay/BarangayEmergencies.jsx	2026-10-08 03:35:25.253067373 +0000
+@@ -1,47 +1,65 @@
+ // src/pages/barangay/BarangayEmergencies.jsx
+ //
+-// Read-only: a barangay account is kept aware of emergency alerts from
+-// students currently living in their barangay, so they can coordinate
+-// with OSAS or respond directly if needed - but the case itself is still
+-// owned and logged by OSAS. Each case can be expanded to see exactly
+-// where the student was when they triggered the alert, with directions.
++// Read-only: a barangay account sees emergency alerts from students currently
++// living in their barangay the moment they are raised (open cases first), so
++// they can coordinate with OSAS or respond directly if needed - but the case
++// itself is still owned and logged by OSAS. When the student chose to share
++// their location it is shown on a map right away for open cases, with directions.
+ 
+-import { useEffect, useState } from "react";
++import { Fragment, useEffect, useState } from "react";
+ import { api } from "../../api/client";
+ import EmergencyLocationMap from "../../components/EmergencyLocationMap";
+ 
++const OPEN = ["Active", "Responding"];
++
+ function StatusPill({ status }) {
+   const map = { active:"pending", responding:"pending", resolved:"ok", cancelled:"" };
+-  return <span className={`badge ${map[status] || ""}`}>{status}</span>;
++  return <span className={`badge ${map[(status || "").toLowerCase()] || ""}`}>{status}</span>;
+ }
+ 
+ export default function BarangayEmergencies() {
+   const [cases, setCases] = useState([]);
+   const [loading, setLoading] = useState(true);
+   const [error, setError] = useState("");
+-  const [expandedId, setExpandedId] = useState(null);
++  // Per-case override of the default (open cases with a location start expanded).
++  const [toggled, setToggled] = useState({});
+ 
+   useEffect(() => {
+-    api.barangay.listEmergencies()
+-      .then(setCases)
+-      .catch(err => setError(err.message))
+-      .finally(() => setLoading(false));
++    let alive = true;
++    const load = (silent) => api.barangay.listEmergencies()
++      .then(d => { if (alive) { setCases(d); setError(""); } })
++      .catch(err => { if (alive && !silent) setError(err.message); })
++      .finally(() => { if (alive && !silent) setLoading(false); });
++    load(false);
++    const t = setInterval(() => { if (document.visibilityState === "visible") load(true); }, 10000);
++    return () => { alive = false; clearInterval(t); };
+   }, []);
+ 
++  const expanded = (c) => (c.id in toggled ? toggled[c.id] : OPEN.includes(c.status) && c.latitude != null);
++  const flip = (c) => setToggled(t => ({ ...t, [c.id]: !expanded(c) }));
++  const openCount = cases.filter(c => OPEN.includes(c.status)).length;
++
+   return (
+     <>
+       <div className="osas-main-head">
+         <div>
+           <div className="osas-main-title">Student emergencies</div>
+           <div className="osas-main-sub">
+-            Emergency alerts from students currently boarding in your barangay. OSAS logs and
+-            follows up on each case - this view keeps you aware in case local coordination is needed.
++            Emergency alerts from students currently boarding in your barangay appear here as soon as they
++            are raised. OSAS logs and follows up on each case - this view keeps you aware in case local
++            coordination is needed.
+           </div>
+         </div>
+       </div>
+ 
+       {error && <div className="error-banner">{error}</div>}
+ 
++      {openCount > 0 && (
++        <div className="error-banner" style={{ marginBottom:14 }}>
++          🚨 {openCount} open emergency alert{openCount > 1 ? "s" : ""} in your barangay.
++        </div>
++      )}
++
+       <div className="card">
+         {loading ? <div className="loading-text">Loading...</div>
+         : cases.length === 0 ? <div className="review-empty">No emergency alerts from your barangay yet.</div>
+@@ -50,30 +68,34 @@
+             <tbody>
+               <tr><th>Student</th><th>Category</th><th>Status</th><th>Reported</th><th></th></tr>
+               {cases.map(c => (
+-                <>
+-                  <tr key={c.id}>
++                <Fragment key={c.id}>
++                  <tr>
+                     <td>{c.student_name || "Unknown"}</td>
+                     <td>{c.category}</td>
+                     <td><StatusPill status={c.status} /></td>
+                     <td style={{fontSize:12,color:"#6b6457"}}>{new Date(c.created_at).toLocaleString()}</td>
+                     <td>
+-                      <button className="btn" style={{fontSize:11.5,padding:"5px 10px"}}
+-                        onClick={() => setExpandedId(expandedId === c.id ? null : c.id)}>
+-                        {expandedId === c.id ? "Hide" : "Location"}
++                      <button className="btn" style={{fontSize:11.5,padding:"5px 10px"}} onClick={() => flip(c)}>
++                        {expanded(c) ? "Hide" : "📍 Location"}
+                       </button>
+                     </td>
+                   </tr>
+-                  {expandedId === c.id && (
+-                    <tr key={`${c.id}-loc`}>
++                  {expanded(c) && (
++                    <tr>
+                       <td colSpan={5} style={{ background:"#f6f4ee", padding:16 }}>
++                        {c.details && (
++                          <div style={{ fontSize:12.5, color:"#544f43", marginBottom:12 }}>
++                            <strong>Student's note:</strong> {c.details}
++                          </div>
++                        )}
+                         <div className="panel-title" style={{ fontSize:12.5, marginBottom:8 }}>
+-                          Location when SOS was sent
++                          Location shared by the student
+                         </div>
+                         <EmergencyLocationMap latitude={c.latitude} longitude={c.longitude} />
+                       </td>
+                     </tr>
+                   )}
+-                </>
++                </Fragment>
+               ))}
+             </tbody>
+           </table>
+diff -ruN a/frontend/src/pages/barangay/BarangayLayout.jsx b/frontend/src/pages/barangay/BarangayLayout.jsx
+--- a/frontend/src/pages/barangay/BarangayLayout.jsx	2026-10-07 10:58:24.236719272 +0000
++++ b/frontend/src/pages/barangay/BarangayLayout.jsx	2026-10-08 03:35:37.986034557 +0000
+@@ -4,7 +4,9 @@
+ // to justify a hamburger + slide-in drawer. On mobile they're shown
+ // directly as a fixed bottom tab bar instead (one tap, no menu to open
+ // first). Desktop keeps the same docked sidebar as OSAS for consistency.
++import { useEffect, useState } from "react";
+ import { useNavigate, useLocation, NavLink, Outlet } from "react-router-dom";
++import { api } from "../../api/client";
+ import { useAuth } from "../../context/AuthContext";
+ import InstallAppButton from "../../components/InstallAppButton";
+ import PortalFooter from "../../components/PortalFooter";
+@@ -21,10 +23,38 @@
+ // main destinations).
+ const DESKTOP_NAV_ITEMS = [...NAV_ITEMS, ["/barangay/profile", "Profile"]];
+ 
++// Counts shown next to the nav items so new work is noticed without opening
++// each page: open emergencies, and concerns OSAS has forwarded but that are
++// not resolved yet. Refreshes in the background.
++function useAlertCounts() {
++  const [counts, setCounts] = useState({ emergencies: 0, concerns: 0 });
++  useEffect(() => {
++    let alive = true;
++    const load = () => Promise.all([api.barangay.listEmergencies(), api.barangay.listConcerns()])
++      .then(([e, c]) => alive && setCounts({
++        emergencies: e.filter(x => x.status === "Active" || x.status === "Responding").length,
++        concerns: c.filter(x => x.status !== "resolved").length,
++      }))
++      .catch(() => {});
++    load();
++    const t = setInterval(() => { if (document.visibilityState === "visible") load(); }, 15000);
++    return () => { alive = false; clearInterval(t); };
++  }, []);
++  return counts;
++}
++
++function CountBadge({ n }) {
++  if (!n) return null;
++  return <span style={{ marginLeft:6, minWidth:18, padding:"0 6px", borderRadius:9, background:"#c0392b", color:"#fff",
++                        fontSize:10.5, fontWeight:700, lineHeight:"18px", display:"inline-block", textAlign:"center" }}>{n}</span>;
++}
++
+ export default function BarangayLayout() {
+   const { fullName, logout } = useAuth();
+   const navigate = useNavigate();
+   const location = useLocation();
++  const counts = useAlertCounts();
++  const badgeFor = (to) => to.endsWith("/emergencies") ? counts.emergencies : to.endsWith("/concerns") ? counts.concerns : 0;
+ 
+   function handleLogout() {
+     if (!window.confirm("Are you sure you want to sign out?")) return;
+@@ -42,7 +72,7 @@
+           {DESKTOP_NAV_ITEMS.map(([to, label]) => (
+             <NavLink key={to} to={to}
+               className={({isActive}) => `osas-nav-item ${isActive?"active":""}`}>
+-              <span className="dot"></span> {label}
++              <span className="dot"></span> {label}<CountBadge n={badgeFor(to)} />
+             </NavLink>
+           ))}
+         </nav>
+@@ -75,7 +105,7 @@
+           <NavLink key={to} to={to}
+             className={({isActive}) => `brgy-tab ${isActive?"active":""}`}>
+             <span className="brgy-tab-dot"></span>
+-            <span>{shortLabel}</span>
++            <span>{shortLabel}<CountBadge n={badgeFor(to)} /></span>
+           </NavLink>
+         ))}
+       </nav>
+diff -ruN a/frontend/src/pages/barangay/BarangayLogin.jsx b/frontend/src/pages/barangay/BarangayLogin.jsx
+--- a/frontend/src/pages/barangay/BarangayLogin.jsx	2026-10-07 10:58:24.236736751 +0000
++++ b/frontend/src/pages/barangay/BarangayLogin.jsx	2026-10-08 03:36:02.215702562 +0000
+@@ -1,7 +1,8 @@
+ // src/pages/barangay/BarangayLogin.jsx
+ //
+-// Password sign-in is for existing accounts (still created by OSAS, scoped
+-// to a barangay via barangay_name). Google sign-in/sign-up is also offered
++// Barangay accounts sign in with a Gmail address and can now also create
++// their own account here (scoped to a barangay via barangay_name).
++// Google sign-in/sign-up is also offered
+ // here now - a brand new barangay account created that way is asked for
+ // its barangay name inside the Terms & Conditions step (see
+ // GoogleSignInButton), since there's no other way to know which barangay
+@@ -14,7 +15,19 @@
+ import GoogleSignInButton from "../../components/GoogleSignInButton";
+ import "../osas/osas.css";
+ 
++// Suggested names - matches how barangays are named in the rest of GeoTrack,
++// but the field stays free text so any barangay can be entered.
++const BARANGAY_SUGGESTIONS = [
++  "Brgy. Del Remedio", "Brgy. San Rafael", "Brgy. San Benito",
++  "Brgy. San Isidro", "Brgy. San Miguel", "Brgy. Balayhangin",
++];
++
+ export default function BarangayLogin() {
++  const [mode, setMode] = useState("login");           // login | register
++  const [fullName, setFullName] = useState("");
++  const [barangayName, setBarangayName] = useState("");
++  const [contactNumber, setContactNumber] = useState("");
++  const [confirmPassword, setConfirmPassword] = useState("");
+   const [email, setEmail] = useState("");
+   const [password, setPassword] = useState("");
+   const [showPass, setShowPass] = useState(false);
+@@ -27,9 +40,18 @@
+   async function handleSubmit(e) {
+     e.preventDefault();
+     setError("");
++    if (mode === "register") {
++      if (!/^[^\s@]+@gmail\.com$/i.test(email.trim())) { setError("Barangay accounts must use a Gmail address (name@gmail.com)."); return; }
++      if (password !== confirmPassword) { setError("Passwords do not match."); return; }
++    }
+     setLoading(true);
+     try {
+-      const session = await api.loginRequest(email, password);
++      const session = mode === "login"
++        ? await api.loginRequest(email, password)
++        : await api.registerBarangay({
++            full_name: fullName.trim(), email: email.trim().toLowerCase(), password,
++            barangay_name: barangayName.trim(), contact_number: contactNumber.trim() || null,
++          });
+       if (session.role !== "barangay") {
+         setError("This account is not registered as a barangay account.");
+         setLoading(false);
+@@ -39,7 +61,7 @@
+       navigate("/barangay/boarding-houses");
+     } catch (err) {
+       const msg = err.message || "";
+-      setError(msg.includes("Incorrect") || msg.includes("401")
++      setError(mode === "login" && (msg.includes("Incorrect") || msg.includes("401"))
+         ? "No account found with these credentials." : msg);
+     } finally {
+       setLoading(false);
+@@ -69,22 +91,48 @@
+         </div>
+ 
+         <div className="osas-login-form">
+-          <div className="form-eyebrow">Barangay sign in</div>
+-          <h1 className="form-title">Welcome back</h1>
+-          <p className="form-hint">This portal is restricted to barangay accounts set up by OSAS.</p>
++          <div className="form-eyebrow">Barangay {mode === "login" ? "sign in" : "registration"}</div>
++          <h1 className="form-title">{mode === "login" ? "Welcome back" : "Create barangay account"}</h1>
++          <p className="form-hint">
++            {mode === "login"
++              ? "This portal is for barangay officials. Sign in with your Gmail account."
++              : "Register with a Gmail address and the barangay you represent."}
++          </p>
+ 
+           {error && <div className="error-banner">{error}</div>}
+ 
+           <form onSubmit={handleSubmit}>
++            {mode === "register" && (
++              <>
++                <div className="field">
++                  <label>Full name</label>
++                  <input value={fullName} onChange={e => setFullName(e.target.value)} required placeholder="Your name" />
++                </div>
++                <div className="field">
++                  <label>Barangay</label>
++                  <input list="brgy-suggestions" value={barangayName} onChange={e => setBarangayName(e.target.value)}
++                    required placeholder="e.g. Brgy. Del Remedio" />
++                  <datalist id="brgy-suggestions">
++                    {BARANGAY_SUGGESTIONS.map(b => <option key={b} value={b} />)}
++                  </datalist>
++                </div>
++                <div className="field">
++                  <label>Contact number (optional)</label>
++                  <input value={contactNumber} onChange={e => setContactNumber(e.target.value)} placeholder="09XX XXX XXXX" />
++                </div>
++              </>
++            )}
+             <div className="field">
+-              <label>Email</label>
+-              <input type="email" value={email} onChange={e => setEmail(e.target.value)} required />
++              <label>Gmail address</label>
++              <input type="email" value={email} onChange={e => setEmail(e.target.value)} required
++                placeholder="name@gmail.com" autoComplete="email" />
+             </div>
+             <div className="field">
+               <label>Password</label>
+               <div style={{ position:"relative" }}>
+                 <input type={showPass ? "text" : "password"} value={password}
+                   onChange={e => setPassword(e.target.value)} required minLength={8}
++                  autoComplete={mode === "login" ? "current-password" : "new-password"}
+                   style={{ paddingRight:48 }} />
+                 <button type="button" onClick={() => setShowPass(!showPass)} style={{
+                   position:"absolute", right:10, top:"50%", transform:"translateY(-50%)",
+@@ -92,19 +140,41 @@
+                 }}>{showPass ? "Hide" : "Show"}</button>
+               </div>
+             </div>
++            {mode === "register" && (
++              <>
++                <p style={{ fontSize:11, color:"#857d6c", margin:"-6px 0 12px" }}>
++                  8-12 characters with an uppercase letter, a lowercase letter, a number and a special character.
++                </p>
++                <div className="field">
++                  <label>Confirm password</label>
++                  <input type={showPass ? "text" : "password"} value={confirmPassword}
++                    onChange={e => setConfirmPassword(e.target.value)} required minLength={8} autoComplete="new-password" />
++                </div>
++              </>
++            )}
+             <button className="btn primary" style={{ width:"100%", padding:13 }} disabled={loading}>
+-              {loading ? "Please wait..." : "Sign in"}
++              {loading ? "Please wait..." : mode === "login" ? "Sign in" : "Create account"}
+             </button>
+           </form>
+ 
+-          <GoogleSignInButton role="barangay" onSuccess={handleGoogleSuccess} onError={setError} />
++          {mode === "login" && (
++            <GoogleSignInButton role="barangay" onSuccess={handleGoogleSuccess} onError={setError} />
++          )}
++
++          <div style={{ textAlign:"center", marginTop:12, fontSize:12.5, color:"#6b6457" }}>
++            {mode === "login" ? "No account yet? " : "Already have an account? "}
++            <button type="button" onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); }} style={{
++              background:"none", border:"none", color:"var(--moss)", fontWeight:700, cursor:"pointer",
++              fontFamily:"inherit", fontSize:12.5, textDecoration:"underline",
++            }}>{mode === "login" ? "Create an account" : "Sign in"}</button>
++          </div>
+ 
+-          <div style={{ textAlign:"center", marginTop:10 }}>
++          {mode === "login" && <div style={{ textAlign:"center", marginTop:10 }}>
+             <button type="button" onClick={() => navigate("/barangay/forgot-password")} style={{
+               background:"none", border:"none", color:"#857d6c", fontSize:12,
+               cursor:"pointer", fontFamily:"inherit", textDecoration:"underline",
+             }}>Forgot password?</button>
+-          </div>
++          </div>}
+ 
+           <div className="scope-note">
+             This portal is for barangay officials only.
+diff -ruN a/frontend/src/pages/osas/OsasConcerns.jsx b/frontend/src/pages/osas/OsasConcerns.jsx
+--- a/frontend/src/pages/osas/OsasConcerns.jsx	2026-10-07 10:58:24.236941890 +0000
++++ b/frontend/src/pages/osas/OsasConcerns.jsx	2026-10-08 03:35:37.987798210 +0000
+@@ -41,7 +41,7 @@
+       <div className="osas-main-head">
+         <div>
+           <div className="osas-main-title">Reported concerns</div>
+-          <div className="osas-main-sub">Safety, landlord, and maintenance issues reported by students.</div>
++          <div className="osas-main-sub">Safety, landlord, and maintenance issues reported by students. Set a concern to <strong>active</strong> to open it and forward it to the student's barangay.</div>
+         </div>
+       </div>
+ 
+@@ -93,7 +93,7 @@
+                         style={{ padding: "6px 8px", fontSize: 12 }}
+                       >
+                         {STATUS_OPTIONS.map((s) => (
+-                          <option key={s} value={s}>{s.replace("_", " ")}</option>
++                          <option key={s} value={s}>{s === "in_progress" ? "active (forward to barangay)" : s.replace("_", " ")}</option>
+                         ))}
+                       </select>
+                     </td>
+diff -ruN a/frontend/src/pages/osas/OsasEmergencies.jsx b/frontend/src/pages/osas/OsasEmergencies.jsx
+--- a/frontend/src/pages/osas/OsasEmergencies.jsx	2026-10-07 10:58:24.237005311 +0000
++++ b/frontend/src/pages/osas/OsasEmergencies.jsx	2026-10-08 03:35:19.195045997 +0000
+@@ -39,15 +39,23 @@
+   const [noteDraft, setNoteDraft] = useState("");
+   const [savingId, setSavingId] = useState(null);
+ 
+-  function load() {
+-    setLoading(true);
++  // silent=true is the background refresh: no spinner, so rows and any
++  // expanded map don't flicker while OSAS is working through a case.
++  function load(silent = false) {
++    if (!silent) setLoading(true);
+     api.osas.listEmergencies(filter === "All" ? null : filter)
+-      .then(setCases)
+-      .catch(err => setError(err.message))
+-      .finally(() => setLoading(false));
++      .then(d => { setCases(d); if (silent) setError(""); })
++      .catch(err => { if (!silent) setError(err.message); })
++      .finally(() => { if (!silent) setLoading(false); });
+   }
+ 
+-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [filter]);
++  useEffect(() => {
++    load();
++    // New student alerts show up here on their own - no manual reload.
++    const t = setInterval(() => { if (document.visibilityState === "visible") load(true); }, 10000);
++    return () => clearInterval(t);
++    // eslint-disable-next-line
++  }, [filter]);
+ 
+   async function handleStatusChange(caseId, status) {
+     setSavingId(caseId);
+@@ -138,10 +146,18 @@
+                     <td>{c.category}</td>
+                     <td style={{ fontSize: 11.5 }}>
+                       {c.latitude
+-                        ? <a href={`https://www.openstreetmap.org/?mlat=${c.latitude}&mlon=${c.longitude}#map=17/${c.latitude}/${c.longitude}`}
+-                             target="_blank" rel="noreferrer" style={{ color:"var(--moss)" }}>
+-                            {c.latitude.toFixed(5)}, {c.longitude.toFixed(5)}
+-                          </a>
++                        ? <>
++                            <button className="btn" style={{ fontSize:11.5, padding:"5px 10px" }}
++                              onClick={() => setExpandedId(expandedId === c.id ? null : c.id)}>
++                              📍 {expandedId === c.id ? "Hide map" : "View map"}
++                            </button>
++                            <div style={{ marginTop:4 }}>
++                              <a href={`https://www.openstreetmap.org/?mlat=${c.latitude}&mlon=${c.longitude}#map=17/${c.latitude}/${c.longitude}`}
++                                 target="_blank" rel="noreferrer" style={{ color:"var(--moss)" }}>
++                                {c.latitude.toFixed(5)}, {c.longitude.toFixed(5)}
++                              </a>
++                            </div>
++                          </>
+                         : <span style={{ color:"#a39c8a" }}>Not shared</span>}
+                     </td>
+                     <td style={{ fontSize: 11.5 }}>{new Date(c.created_at).toLocaleString()}</td>
+@@ -170,7 +186,7 @@
+                             <strong>Student's note:</strong> {c.details}
+                           </div>
+                         )}
+-                        <div className="panel-title" style={{ fontSize:12.5, marginBottom:8 }}>Location when SOS was sent</div>
++                        <div className="panel-title" style={{ fontSize:12.5, marginBottom:8 }}>Location shared by the student</div>
+                         <EmergencyLocationMap latitude={c.latitude} longitude={c.longitude} />
+                         <div className="panel-title" style={{ fontSize:12.5, margin:"16px 0 8px" }}>Timeline</div>
+                         {c.timeline.map((e, i) => (
+diff -ruN a/frontend/src/pages/osas/OsasStatusUpdates.jsx b/frontend/src/pages/osas/OsasStatusUpdates.jsx
+--- a/frontend/src/pages/osas/OsasStatusUpdates.jsx	2026-10-07 10:58:24.237484244 +0000
++++ b/frontend/src/pages/osas/OsasStatusUpdates.jsx	2026-10-07 15:59:37.553522768 +0000
+@@ -1,7 +1,8 @@
+ // src/pages/osas/OsasStatusUpdates.jsx - with search + filter panel
+-import { useEffect, useState } from "react";
++import { useEffect, useRef, useState } from "react";
+ import { api } from "../../api/client";
+ import MonthCalendar, { monthLabel } from "../../components/MonthCalendar";
++import CalendarPopover from "../../components/CalendarPopover";
+ 
+ function MonthFilterDropdown({ month, onChange }) {
+   const now = new Date();
+@@ -9,31 +10,25 @@
+   const [viewYear, setViewYear] = useState(now.getFullYear());
+   const [viewMonth, setViewMonth] = useState(now.getMonth());
+ 
++  const btnRef = useRef(null);
++
+   return (
+-    <div style={{ position:"relative" }}>
+-      <button type="button" className="btn" style={{ minWidth:170, textAlign:"left", display:"flex", justifyContent:"space-between", alignItems:"center" }}
++    <div>
++      <button ref={btnRef} type="button" className="btn" aria-haspopup="dialog" aria-expanded={open}
++        style={{ minWidth:170, textAlign:"left", display:"flex", justifyContent:"space-between", alignItems:"center" }}
+         onClick={() => setOpen(v => !v)}>
+         <span>📅 {month || "All months"}</span>
+         <span style={{ color:"#a39c8a" }}>{open ? "▴" : "▾"}</span>
+       </button>
+-      {open && (
+-        <>
+-          <div onClick={() => setOpen(false)} style={{ position:"fixed", inset:0, zIndex:19, background:"transparent" }} />
+-          <div style={{
+-            position:"absolute", top:"100%", left:0, marginTop:4, zIndex:20,
+-            background:"#fff", border:"1px solid var(--line)", borderRadius:12,
+-            boxShadow:"0 8px 24px rgba(28,43,36,.18)", padding:12,
+-          }}>
+-            <MonthCalendar year={viewYear} month={viewMonth} onSelect={(y,m) => {
+-              setViewYear(y); setViewMonth(m); onChange(monthLabel(y, m)); setOpen(false);
+-            }} />
+-            <button type="button" className="btn" style={{ width:"100%", marginTop:8, fontSize:12 }}
+-              onClick={() => { onChange(""); setOpen(false); }}>
+-              Clear (show all months)
+-            </button>
+-          </div>
+-        </>
+-      )}
++      <CalendarPopover open={open} onClose={() => setOpen(false)} anchorRef={btnRef}>
++        <MonthCalendar year={viewYear} month={viewMonth} onSelect={(y,m) => {
++          setViewYear(y); setViewMonth(m); onChange(monthLabel(y, m)); setOpen(false);
++        }} />
++        <button type="button" className="btn" style={{ width:"100%", marginTop:8, fontSize:12 }}
++          onClick={() => { onChange(""); setOpen(false); }}>
++          Clear (show all months)
++        </button>
++      </CalendarPopover>
+     </div>
+   );
+ }
+diff -ruN a/frontend/src/pages/student/StudentProfile.jsx b/frontend/src/pages/student/StudentProfile.jsx
+--- a/frontend/src/pages/student/StudentProfile.jsx	2026-10-07 10:58:24.237894407 +0000
++++ b/frontend/src/pages/student/StudentProfile.jsx	2026-10-07 15:59:37.554816130 +0000
+@@ -15,24 +15,42 @@
+   const [fullName, setFullName] = useState("");
+   const [courseSection, setCourseSection] = useState("");
+   const [gender, setGender] = useState("");
++  const [bhName, setBhName] = useState("");
++  const [bhBarangay, setBhBarangay] = useState("");
++  const [landlordName, setLandlordName] = useState("");
++  const [landlordContact, setLandlordContact] = useState("");
+   const [saving, setSaving] = useState(false);
+ 
++  function fillForm(d) {
++    setFullName(d.full_name); setCourseSection(d.course_section||""); setGender(d.gender||"");
++    setBhName(d.current_boarding_house||""); setBhBarangay(d.current_barangay||"");
++    setLandlordName(d.landlord_name||""); setLandlordContact(d.landlord_contact||"");
++  }
++
+   useEffect(() => { load(); }, []);
+ 
+   function load() {
+     setLoading(true);
+     api.student.myProfile()
+-      .then(d => { setProfile(d); setFullName(d.full_name); setCourseSection(d.course_section||""); setGender(d.gender||""); })
++      .then(d => { setProfile(d); fillForm(d); })
+       .catch(err => setError(err.message))
+       .finally(() => setLoading(false));
+   }
+ 
+   async function handleSave(e) {
+     e.preventDefault();
+-    setSaving(true); setError(""); setSuccess("");
++    setError(""); setSuccess("");
++    if (!!bhName.trim() !== !!bhBarangay.trim()) {
++      setError("Enter both the boarding house name and its barangay."); return;
++    }
++    setSaving(true);
+     try {
+-      const updated = await api.student.updateMyProfile({ full_name:fullName, course_section:courseSection, gender:gender||null });
+-      setProfile(updated);
++      const body = { full_name:fullName, course_section:courseSection, gender:gender||null,
++                     landlord_name:landlordName.trim()||null, landlord_contact:landlordContact.trim()||null };
++      // Only send the house when filled in - it can be changed, not removed here.
++      if (bhName.trim()) { body.boarding_house_name = bhName.trim(); body.boarding_house_barangay = bhBarangay.trim(); }
++      const updated = await api.student.updateMyProfile(body);
++      setProfile(updated); fillForm(updated);
+       updateFullName(updated.full_name);   // update nav/home immediately
+       setEditing(false); setSuccess("Profile updated.");
+     } catch(err) { setError(err.message); }
+@@ -116,9 +134,19 @@
+                   <option value="female">Female</option>
+                 </select>
+               </div>
++              <div style={{fontSize:11.5,fontWeight:700,color:"#544f43",margin:"6px 0 10px",textTransform:"uppercase",letterSpacing:".03em"}}>
++                Boarding house &amp; landlord
++              </div>
++              <div className="field"><label>Boarding house</label><input value={bhName} onChange={e=>setBhName(e.target.value)} placeholder="e.g. Sto. Niño Lodge" /></div>
++              <div className="field"><label>Barangay</label><input value={bhBarangay} onChange={e=>setBhBarangay(e.target.value)} placeholder="e.g. Brgy. Del Remedio" /></div>
++              <div className="field"><label>Landlord name</label><input value={landlordName} onChange={e=>setLandlordName(e.target.value)} placeholder="Optional" /></div>
++              <div className="field"><label>Landlord contact number</label><input value={landlordContact} onChange={e=>setLandlordContact(e.target.value)} placeholder="Optional" /></div>
++              <p style={{fontSize:11,color:"#857d6c",margin:"-6px 0 14px"}}>
++                Changing the boarding house to a different place is recorded as a transfer. Location pins are set from the monthly update.
++              </p>
+               <div className="pill-row">
+                 <button className="btn primary" disabled={saving}>{saving?"Saving...":"Save changes"}</button>
+-                <button type="button" className="btn" onClick={() => setEditing(false)}>Cancel</button>
++                <button type="button" className="btn" onClick={() => { fillForm(profile); setEditing(false); }}>Cancel</button>
+               </div>
+             </form>
+           </div>
+diff -ruN a/frontend/src/pages/student/StudentSOS.jsx b/frontend/src/pages/student/StudentSOS.jsx
+--- a/frontend/src/pages/student/StudentSOS.jsx	2026-10-07 10:58:24.237917730 +0000
++++ b/frontend/src/pages/student/StudentSOS.jsx	2026-10-08 03:34:56.976408684 +0000
+@@ -140,6 +140,8 @@
+   const [details, setDetails] = useState("");
+   const [locationState, setLocationState] = useState("idle"); // idle | locating | ok | denied
+   const [coords, setCoords] = useState(null);
++  const [shareLocation, setShareLocation] = useState(true);   // student's choice: share location with OSAS + barangay
++  const [sharing, setSharing] = useState(false);
+   const [sending, setSending] = useState(false);
+   const [confirming, setConfirming] = useState(false);
+   const [offlineNotice, setOfflineNotice] = useState(false);
+@@ -164,6 +166,11 @@
+   }
+ 
+   useEffect(() => { loadCases(); }, []);
++  // While an alert is open, keep it fresh so status changes from OSAS/barangay show up.
++  useEffect(() => {
++    const t = setInterval(() => { if (document.visibilityState === "visible") loadCases(); }, 15000);
++    return () => clearInterval(t);
++  }, []);
+   useEffect(() => {
+     // Best-effort - if this fails (offline, etc.) buildContacts() just
+     // keeps using the static placeholder rows, so no error handling needed.
+@@ -186,7 +193,31 @@
+   function startConfirm(cat) {
+     setCategory(cat);
+     setConfirming(true);
+-    requestLocation();
++    if (shareLocation) requestLocation();
++  }
++
++  function toggleShare(on) {
++    setShareLocation(on);
++    if (on) requestLocation();
++    else { setCoords(null); setLocationState("idle"); }
++  }
++
++  // Share (or refresh) location on an alert that is already open.
++  function shareNow() {
++    if (!activeCase) return;
++    if (!navigator.geolocation) { setError("Location is not available on this device."); return; }
++    setSharing(true); setError("");
++    navigator.geolocation.getCurrentPosition(
++      async pos => {
++        try {
++          await api.student.shareSOSLocation(activeCase.id, { latitude: pos.coords.latitude, longitude: pos.coords.longitude });
++          loadCases();
++        } catch (err) { setError(err.message); }
++        finally { setSharing(false); }
++      },
++      () => { setSharing(false); setError("Couldn't get your location. Check that location access is allowed for this site."); },
++      { enableHighAccuracy: true, timeout: 10000 }
++    );
+   }
+ 
+   async function handleSendSOS() {
+@@ -196,8 +227,8 @@
+       await api.student.triggerSOS({
+         category,
+         details: details.trim() || null,
+-        latitude: coords?.latitude ?? null,
+-        longitude: coords?.longitude ?? null,
++        latitude: shareLocation ? (coords?.latitude ?? null) : null,
++        longitude: shareLocation ? (coords?.longitude ?? null) : null,
+       });
+       setConfirming(false); setCategory(""); setDetails(""); setCoords(null); setLocationState("idle");
+       loadCases();
+@@ -257,11 +288,14 @@
+             {activeCase.details && (
+               <p style={{ fontSize:12.5, color:"#544f43", marginTop:10 }}>{activeCase.details}</p>
+             )}
+-            <div style={{ fontSize:11, color:"#a39c8a", marginTop:8 }}>
++            <div style={{ fontSize:11.5, color: activeCase.latitude ? "#2f5d3f" : "#a39c8a", marginTop:8 }}>
+               {activeCase.latitude
+-                ? `Location shared - ${activeCase.latitude.toFixed(5)}, ${activeCase.longitude.toFixed(5)}`
+-                : "No location shared"}
++                ? `📍 Location shared with OSAS and your barangay - ${activeCase.latitude.toFixed(5)}, ${activeCase.longitude.toFixed(5)}`
++                : "No location shared yet"}
+             </div>
++            <button className="btn" style={{ marginTop:8, fontSize:12 }} onClick={shareNow} disabled={sharing}>
++              {sharing ? "Getting location..." : activeCase.latitude ? "Update my location" : "Share my location now"}
++            </button>
+             <div style={{ borderTop:"1px solid var(--line)", marginTop:14, paddingTop:12 }}>
+               <div className="card-title" style={{ fontSize:12.5 }}>Timeline</div>
+               <Timeline entries={activeCase.timeline} />
+@@ -276,10 +310,15 @@
+               can coordinate and follow up, but for anything urgent, call or text
+               the direct contacts above first.
+             </p>
++            <label style={{ display:"flex", gap:8, alignItems:"center", fontSize:12.5, margin:"0 0 8px", cursor:"pointer" }}>
++              <input type="checkbox" checked={shareLocation} onChange={e => toggleShare(e.target.checked)} />
++              Share my location with OSAS and my barangay
++            </label>
+             <div style={{ fontSize:11.5, marginBottom:12 }}>
+-              {locationState === "locating" && <span style={{color:"#8a6414"}}>Getting your location...</span>}
+-              {locationState === "ok" && <span style={{color:"#2f5d3f"}}>Location ready to share with OSAS.</span>}
+-              {locationState === "denied" && <span style={{color:"#7a3a23"}}>Location unavailable - the alert will still be sent without it.</span>}
++              {!shareLocation && <span style={{color:"#6b6457"}}>Your location will not be sent. You can still share it after the alert is sent.</span>}
++              {shareLocation && locationState === "locating" && <span style={{color:"#8a6414"}}>Getting your location...</span>}
++              {shareLocation && locationState === "ok" && <span style={{color:"#2f5d3f"}}>Location ready to share with OSAS and your barangay.</span>}
++              {shareLocation && locationState === "denied" && <span style={{color:"#7a3a23"}}>Location unavailable - the alert will still be sent without it.</span>}
+             </div>
+             <div className="field">
+               <label>Anything OSAS should know? (optional)</label>
+diff -ruN a/frontend/src/pages/student/StudentStatus.jsx b/frontend/src/pages/student/StudentStatus.jsx
+--- a/frontend/src/pages/student/StudentStatus.jsx	2026-10-07 10:58:24.237945678 +0000
++++ b/frontend/src/pages/student/StudentStatus.jsx	2026-10-07 15:59:37.552456662 +0000
+@@ -14,9 +14,10 @@
+ // is replaced with a confirmation - it reopens automatically next month.
+ // Past entries can still be edited or deleted from the list below.
+ 
+-import { useEffect, useState } from "react";
++import { useEffect, useRef, useState } from "react";
+ import { api } from "../../api/client";
+ import MonthCalendar, { monthLabel } from "../../components/MonthCalendar";
++import CalendarPopover from "../../components/CalendarPopover";
+ import PinDropMap from "../../components/PinDropMap";
+ 
+ async function geocode(address) {
+@@ -78,36 +79,29 @@
+   const [open, setOpen] = useState(false);
+   const [viewYear, setViewYear] = useState(now.getFullYear());
+   const [viewMonth, setViewMonth] = useState(now.getMonth());
++  const btnRef = useRef(null);
+   const submittedMonths = new Set(pastUpdates.map(u => u.month_label));
+   const viewedLabel = monthLabel(viewYear, viewMonth);
+ 
+   return (
+-    <div className="field" style={{ position:"relative" }}>
++    <div className="field">
+       <label>Current month</label>
+-      <button type="button" className="btn" style={{ width:"100%", textAlign:"left", display:"flex", justifyContent:"space-between", alignItems:"center" }}
++      <button ref={btnRef} type="button" className="btn" aria-haspopup="dialog" aria-expanded={open}
++        style={{ width:"100%", textAlign:"left", display:"flex", justifyContent:"space-between", alignItems:"center" }}
+         onClick={() => setOpen(v => !v)}>
+         <span>📅 {CURRENT_MONTH}</span>
+         <span style={{ color:"#a39c8a" }}>{open ? "▴" : "▾"}</span>
+       </button>
+-      {open && (
+-        <>
+-          {/* Tap anywhere outside to close, instead of it staying open and
+-              floating over the rest of the page indefinitely. */}
+-          <div onClick={() => setOpen(false)}
+-            style={{ position:"fixed", inset:0, zIndex:19, background:"transparent" }} />
+-          <div style={{
+-            position:"absolute", top:"100%", left:0, marginTop:4, zIndex:20,
+-            background:"#fff", border:"1px solid var(--line)", borderRadius:12,
+-            boxShadow:"0 8px 24px rgba(28,43,36,.18)", padding:12,
+-          }}>
+-            <MonthCalendar year={viewYear} month={viewMonth} onSelect={(y,m) => { setViewYear(y); setViewMonth(m); }} />
+-            <div style={{ marginTop:8, fontSize:12, color: submittedMonths.has(viewedLabel) ? "var(--ok)" : "#a39c8a" }}>
+-              {viewedLabel}{viewedLabel === CURRENT_MONTH ? " (this month)" : ""}
+-              {submittedMonths.has(viewedLabel) && " - already submitted"}
+-            </div>
+-          </div>
+-        </>
+-      )}
++      {/* Rendered in a portal so it can't be clipped or covered by the cards around it. */}
++      <CalendarPopover open={open} onClose={() => setOpen(false)} anchorRef={btnRef}>
++        <MonthCalendar year={viewYear} month={viewMonth} onSelect={(y,m) => { setViewYear(y); setViewMonth(m); }} />
++        <div style={{ marginTop:8, fontSize:12, color: submittedMonths.has(viewedLabel) ? "var(--ok)" : "#a39c8a" }}>
++          {viewedLabel}{viewedLabel === CURRENT_MONTH ? " (this month)" : ""}
++          {submittedMonths.has(viewedLabel) && " - already submitted"}
++        </div>
++        <button type="button" className="btn" style={{ width:"100%", marginTop:10, fontSize:12 }}
++          onClick={() => setOpen(false)}>Done</button>
++      </CalendarPopover>
+     </div>
+   );
+ }
+--- a/backend/main.py	2026-10-07 10:58:24.232702061 +0000
++++ b/backend/main.py	2026-10-07 10:59:03.908561152 +0000
+@@ -366,6 +366,22 @@
+     return resp
+ 
+ 
++@app.post("/api/auth/register/barangay", response_model=schemas.TokenResponse)
++def register_barangay(payload: schemas.RegisterBarangayRequest, db: Session = Depends(get_db)):
++    if db.query(models.User).filter(models.User.email == payload.email).first():
++        raise HTTPException(400, "Email already registered.")
++    user = models.User(full_name=payload.full_name, email=payload.email,
++                       hashed_password=hash_password(payload.password),
++                       role="barangay", barangay_name=payload.barangay_name,
++                       contact_number=(payload.contact_number or "").strip() or None,
++                       is_email_verified=True)
++    db.add(user); db.commit(); db.refresh(user)
++    log_action(db, user, "create", "user", user.id, user.full_name,
++               f"Barangay account registered ({user.barangay_name})")
++    token = create_access_token({"sub": str(user.id), "role": user.role})
++    return schemas.TokenResponse(access_token=token, role=user.role, full_name=user.full_name)
++
++
+ @app.post("/api/auth/register/osas", response_model=schemas.TokenResponse)
+ def register_osas(payload: schemas.RegisterOsasRequest, db: Session = Depends(get_db)):
+     if db.query(models.User).filter(models.User.email == payload.email).first():
+@@ -457,6 +473,10 @@
+         raise HTTPException(409, "This email is already registered under a different GeoTrack account type.")
+ 
+     if user is None:
++        try:
++            schemas.validate_gmail_email(email)
++        except ValueError as e:
++            raise HTTPException(400, str(e))
+         if not payload.accept_terms:
+             return schemas.TokenResponse(access_token="", role="barangay", requires_terms=True,
+                                          full_name=info.get("name") or email.split("@")[0])
+@@ -600,22 +620,26 @@
+ 
+ 
+ # ─── STUDENT endpoints ────────────────────────────────────────────────────────
+-@app.get("/api/student/me", response_model=schemas.MyProfileOut)
+-def my_profile(db: Session = Depends(get_db), user: models.User = Depends(require_student)):
+-    latest = (db.query(models.StatusUpdate)
+-                .filter(models.StatusUpdate.student_id == user.id)
+-                .order_by(models.StatusUpdate.created_at.desc())
+-                .first())
++def _latest_status_update(db, student_id: int):
++    return (db.query(models.StatusUpdate)
++              .filter(models.StatusUpdate.student_id == student_id)
++              .order_by(models.StatusUpdate.created_at.desc(), models.StatusUpdate.id.desc())
++              .first())
++
++
++def _profile_out(db, user) -> schemas.MyProfileOut:
++    """Profile payload incl. the current boarding house / landlord, derived
++    from the student's most recent status update (not stored on the user)."""
++    latest = _latest_status_update(db, user.id)
+     boarding_house_name = current_barangay = landlord_name = landlord_contact = None
+     if latest:
+-        if latest.status_type == "transferred":
++        if latest.boarding_house:
++            h = latest.boarding_house
++            boarding_house_name, current_barangay = h.name, h.barangay
++            landlord_name, landlord_contact = h.contact_person, h.contact_number
++        elif latest.status_type == "transferred":
+             boarding_house_name = latest.new_boarding_house_name
+             current_barangay = latest.new_barangay
+-        elif latest.boarding_house:
+-            boarding_house_name = latest.boarding_house.name
+-            current_barangay = latest.boarding_house.barangay
+-            landlord_name = latest.boarding_house.contact_person
+-            landlord_contact = latest.boarding_house.contact_number
+     return schemas.MyProfileOut(
+         id=user.id, full_name=user.full_name, email=user.email,
+         course_section=user.course_section, gender=user.gender,
+@@ -624,15 +648,95 @@
+         landlord_name=landlord_name, landlord_contact=landlord_contact,
+     )
+ 
++
++@app.get("/api/student/me", response_model=schemas.MyProfileOut)
++def my_profile(db: Session = Depends(get_db), user: models.User = Depends(require_student)):
++    return _profile_out(db, user)
++
++
+ @app.put("/api/student/me", response_model=schemas.MyProfileOut)
+ def update_profile(payload: schemas.MyProfileUpdate, db: Session = Depends(get_db),
+                    user: models.User = Depends(require_student)):
+     old_name = user.full_name
+-    for f, v in payload.dict(exclude_unset=True).items(): setattr(user, f, v)
++    data = payload.dict(exclude_unset=True)
++
++    bh_name = (data.pop("boarding_house_name", None) or "").strip()
++    bh_brgy = (data.pop("boarding_house_barangay", None) or "").strip()
++    has_ll_name = "landlord_name" in data
++    has_ll_contact = "landlord_contact" in data
++    ll_name = (data.pop("landlord_name", None) or "").strip() or None
++    ll_contact = (data.pop("landlord_contact", None) or "").strip() or None
++
++    if bool(bh_name) != bool(bh_brgy):
++        raise HTTPException(400, "Enter both the boarding house name and its barangay.")
++
++    for f, v in data.items(): setattr(user, f, v)
++
++    latest = _latest_status_update(db, user.id)
++    cur = latest.boarding_house if (latest and latest.boarding_house) else None
++    old_ll_name = cur.contact_person if cur else None
++    old_ll_contact = cur.contact_number if cur else None
++    target = cur
++    changes = []
++
++    if bh_name:
++        same_place = bool(cur) and cur.name.strip().lower() == bh_name.lower() and _same_brgy(cur.barangay, bh_brgy)
++        if not same_place:
++            only_mine = (
++                cur is not None and not cur.is_verified and cur.submitted_by_id == user.id
++                and db.query(models.StatusUpdate).filter(
++                    models.StatusUpdate.boarding_house_id == cur.id,
++                    models.StatusUpdate.student_id != user.id).count() == 0
++            )
++            if only_mine:
++                # Nobody else lives there and it isn't verified yet - this is
++                # the student correcting their own record, so edit it in place.
++                if not _same_brgy(cur.barangay, bh_brgy):
++                    cur.latitude = cur.longitude = None   # old pin no longer applies
++                changes.append(f"Boarding house: {cur.name} ({cur.barangay}) -> {bh_name} ({bh_brgy})")
++                cur.name, cur.barangay = bh_name, bh_brgy
++                if latest.status_type == "transferred":
++                    latest.new_boarding_house_name, latest.new_barangay = bh_name, bh_brgy
++                target = cur
++            else:
++                # Moving to a different house: link (or create) it and record
++                # the move as a new status update so history stays intact.
++                house = next((h for h in db.query(models.BoardingHouse).all()
++                              if h.name.strip().lower() == bh_name.lower() and _same_brgy(h.barangay, bh_brgy)), None)
++                if not house:
++                    house = models.BoardingHouse(
++                        name=bh_name, barangay=bh_brgy, is_verified=False,
++                        submitted_by=f"Student — {user.full_name}", submitted_by_id=user.id)
++                    db.add(house); db.flush()
++                db.add(models.StatusUpdate(
++                    student_id=user.id, boarding_house_id=house.id,
++                    status_type="transferred" if cur else "same",
++                    new_boarding_house_name=bh_name if cur else None,
++                    new_barangay=bh_brgy if cur else None,
++                    note="Updated from profile",
++                    month_label=datetime.utcnow().strftime("%B %Y")))
++                changes.append(f"Boarding house: {cur.name if cur else 'none'} -> {bh_name} ({bh_brgy})")
++                target = house
++
++    wants_landlord = (has_ll_name and ll_name) or (has_ll_contact and ll_contact)
++    if target is None and wants_landlord:
++        raise HTTPException(400, "Add your boarding house first before saving landlord details.")
++    if target is not None:
++        # When the student switched to a house that already exists, the form's
++        # landlord fields are still the OLD house's values - don't copy those
++        # over the new house's own landlord info.
++        switched = target is not cur
++        if has_ll_name and not (switched and ll_name == old_ll_name) and ll_name != target.contact_person:
++            changes.append("Landlord name updated"); target.contact_person = ll_name
++        if has_ll_contact and not (switched and ll_contact == old_ll_contact) and ll_contact != target.contact_number:
++            changes.append("Landlord contact updated"); target.contact_number = ll_contact
++
+     db.commit(); db.refresh(user)
+-    log_action(db, user, "update", "user", user.id, user.full_name,
+-               f"Profile updated (was: {old_name})" if old_name != user.full_name else "Profile updated")
+-    return user
++    detail = f"Profile updated (was: {old_name})" if old_name != user.full_name else "Profile updated"
++    if changes:
++        detail += " | " + "; ".join(changes)
++    log_action(db, user, "update", "user", user.id, user.full_name, detail)
++    return _profile_out(db, user)
+ 
+ @app.get("/api/student/boarding-houses", response_model=List[schemas.BoardingHouseOut])
+ def student_list_bh(db: Session = Depends(get_db), user: models.User = Depends(require_student)):
+@@ -959,10 +1063,8 @@
+     # time, not just OSAS.
+     current_barangay = _student_current_barangay(db, user.id)
+     if current_barangay:
+-        barangay_accounts = (db.query(models.User)
+-                               .filter(models.User.role == "barangay",
+-                                       models.User.barangay_name == current_barangay)
+-                               .all())
++        barangay_accounts = [b for b in db.query(models.User).filter(models.User.role == "barangay").all()
++                             if _same_brgy(b.barangay_name, current_barangay)]
+         if barangay_accounts:
+             notify_all(db, [b.id for b in barangay_accounts], "sos_alert", f"SOS: {payload.category}",
+                        f"{user.full_name} (in {current_barangay}) triggered an SOS alert ({payload.category}).")
+@@ -984,6 +1086,28 @@
+     if not case or case.student_id != user.id: raise HTTPException(404, "Not found")
+     return _emergency_out(case)
+ 
++@app.patch("/api/student/sos/{case_id}/location", response_model=schemas.EmergencyCaseOut)
++def share_sos_location(case_id: int, payload: schemas.SOSLocationUpdate, db: Session = Depends(get_db),
++                       user: models.User = Depends(require_student)):
++    """Student chooses to share (or refresh) their location on an open alert,
++    so OSAS and the student's barangay can see where they are."""
++    case = db.query(models.EmergencyCase).get(case_id)
++    if not case or case.student_id != user.id: raise HTTPException(404, "Not found")
++    if case.status in ("Resolved", "Cancelled"): raise HTTPException(400, "Case already closed")
++    case.latitude, case.longitude = payload.latitude, payload.longitude
++    db.commit()
++    _log_timeline(db, case, user, "Location shared", f"{payload.latitude:.5f}, {payload.longitude:.5f}")
++    log_action(db, user, "update", "emergency", case.id, case.category, "Student shared location")
++    recipients = [a.id for a in db.query(models.User).filter(models.User.role == "osas_admin").all()]
++    brgy = _student_current_barangay(db, user.id)
++    if brgy:
++        recipients += [b.id for b in db.query(models.User).filter(models.User.role == "barangay").all()
++                       if _same_brgy(b.barangay_name, brgy)]
++    notify_all(db, recipients, "sos_alert", f"SOS location: {case.category}",
++               f"{user.full_name} shared their location for an active SOS alert.")
++    db.refresh(case)
++    return _emergency_out(case)
++
+ @app.patch("/api/student/sos/{case_id}/cancel", response_model=schemas.EmergencyCaseOut)
+ def cancel_my_emergency(case_id: int, db: Session = Depends(get_db),
+                         user: models.User = Depends(require_student)):
+@@ -1244,16 +1368,15 @@
+ 
+ @app.get("/api/barangay/boarding-houses", response_model=List[schemas.BoardingHouseOut])
+ def barangay_list_bh(db: Session = Depends(get_db), user: models.User = Depends(require_barangay)):
+-    return (db.query(models.BoardingHouse)
+-              .filter(models.BoardingHouse.barangay == user.barangay_name)
+-              .all())
++    return [h for h in db.query(models.BoardingHouse).all()
++            if _same_brgy(h.barangay, user.barangay_name)]
+ 
+ @app.patch("/api/barangay/boarding-houses/{hid}/permit", response_model=schemas.BoardingHouseOut)
+ def barangay_confirm_permit(hid: int, payload: schemas.BarangayPermitUpdate,
+                              db: Session = Depends(get_db), user: models.User = Depends(require_barangay)):
+     h = db.query(models.BoardingHouse).get(hid)
+     if not h: raise HTTPException(404, "Not found")
+-    if h.barangay != user.barangay_name:
++    if not _same_brgy(h.barangay, user.barangay_name):
+         raise HTTPException(403, "This boarding house is outside your barangay.")
+     h.has_barangay_permit = payload.has_barangay_permit
+     # The barangay's own permit confirmation is what actually grants
+@@ -1287,7 +1410,7 @@
+         if not u or not u.boarding_house: continue
+         h = u.boarding_house
+         if h.latitude is None: continue
+-        if h.barangay != user.barangay_name: continue
++        if not _same_brgy(h.barangay, user.barangay_name): continue
+         points.append(schemas.StudentMapPoint(student_name=s.full_name, boarding_house_name=h.name,
+                                               barangay=h.barangay, latitude=h.latitude,
+                                               longitude=h.longitude, is_flagged=u.is_flagged))
+@@ -1298,12 +1421,19 @@
+     cases = (db.query(models.EmergencyCase)
+                .order_by(models.EmergencyCase.created_at.desc())
+                .all())
+-    return [_emergency_out(c) for c in cases
+-            if _student_current_barangay(db, c.student_id) == user.barangay_name]
++    # Open cases first (that's what the barangay needs to act on), then history.
++    mine = [c for c in cases if _same_brgy(_student_current_barangay(db, c.student_id), user.barangay_name)]
++    mine.sort(key=lambda c: 0 if c.status in ("Active", "Responding") else 1)
++    return [_emergency_out(c) for c in mine]
+ 
+ @app.get("/api/barangay/concerns", response_model=List[schemas.ConcernAdminOut])
+ def barangay_concerns(db: Session = Depends(get_db), user: models.User = Depends(require_barangay)):
+-    concerns = db.query(models.Concern).order_by(models.Concern.created_at.desc()).all()
++    # A new concern ("open") is OSAS's to look at first. It only shows up here
++    # once OSAS has opened/activated it (status moved to in_progress or
++    # resolved), which is how OSAS forwards it to the barangay.
++    concerns = (db.query(models.Concern)
++                  .filter(models.Concern.status != "open")
++                  .order_by(models.Concern.created_at.desc()).all())
+     return [schemas.ConcernAdminOut(
+                 id=c.id, category=c.category, details=c.details, status=c.status,
+                 created_at=c.created_at, photo_data_url=c.photo_data_url,
+@@ -1311,7 +1441,7 @@
+                 student_name=c.student.full_name if c.student else "Unknown",
+                 student_email=c.student.email if c.student else "",
+             ) for c in concerns
+-            if _student_current_barangay(db, c.student_id) == user.barangay_name]
++            if _same_brgy(_student_current_barangay(db, c.student_id), user.barangay_name)]
+ 
+ @app.get("/api/osas/boarding-houses/{hid}/reviews", response_model=List[schemas.ReviewOut])
+ def bh_reviews(hid: int, db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
+@@ -1332,7 +1462,17 @@
+     if new_status not in ("open","in_progress","resolved"): raise HTTPException(400,"Invalid")
+     c = db.query(models.Concern).get(cid)
+     if not c: raise HTTPException(404, "Not found")
++    was_open = c.status == "open"
+     c.status = new_status; db.commit()
++    if was_open and new_status != "open":
++        # OSAS just opened/activated it -> forward to the student's barangay.
++        brgy = _student_current_barangay(db, c.student_id)
++        if brgy:
++            accounts = [b for b in db.query(models.User).filter(models.User.role == "barangay").all()
++                        if _same_brgy(b.barangay_name, brgy)]
++            notify_all(db, [b.id for b in accounts], "concern_forwarded",
++                       f"Concern forwarded by OSAS: {c.category}",
++                       f"OSAS opened a concern from {c.student.full_name if c.student else 'a student'} in {brgy}.")
+     if new_status == "resolved" and c.student_id:
+         notify(db, c.student_id, "resolution", "Your concern was resolved",
+                f"Your reported concern ({c.category}) has been marked resolved by OSAS.")
+@@ -1524,6 +1664,19 @@
+     if u.boarding_house: return u.boarding_house.barangay
+     return None
+ 
++def _norm_brgy(name: Optional[str]) -> str:
++    """'Brgy. Del Remedio', 'Barangay del remedio' and 'Del Remedio' are all the
++    same place - students type this field freely, so compare it loosely."""
++    s = (name or "").lower().strip()
++    s = re.sub(r"^(barangay|brgy)\.?\s*", "", s)
++    return re.sub(r"[^a-z0-9]+", " ", s).strip()
++
++
++def _same_brgy(a: Optional[str], b: Optional[str]) -> bool:
++    na, nb = _norm_brgy(a), _norm_brgy(b)
++    return bool(na) and na == nb
++
++
+ # Course code (the letters at the start of course_section, e.g. "BSIT-3A" -> "BSIT")
+ # to college/department. Add or edit entries here as needed for your campus.
+ COURSE_TO_DEPARTMENT = {
+--- a/backend/schemas.py	2026-10-07 10:58:24.232790878 +0000
++++ b/backend/schemas.py	2026-10-07 10:59:03.890487482 +0000
+@@ -1,6 +1,6 @@
+ """schemas.py — Pydantic request/response shapes for GeoTrack."""
+ import re
+-from pydantic import BaseModel, EmailStr, field_validator
++from pydantic import BaseModel, EmailStr, Field, field_validator
+ from typing import Optional, Literal, List
+ from datetime import datetime
+ from typing import Optional
+@@ -59,6 +59,41 @@
+     def check_strength(cls, v): return validate_strong_password(v)
+ 
+ 
++def validate_gmail_email(v: str) -> str:
++    """Barangay accounts are not tied to a school domain the way students
++    are, so they sign up with a personal/official Gmail address instead.
++    Shared by password registration and Google sign-up (main.py)."""
++    v = str(v).lower().strip()
++    if not v.endswith("@gmail.com"):
++        raise ValueError("Barangay accounts must use a Gmail address (name@gmail.com).")
++    return v
++
++
++class RegisterBarangayRequest(BaseModel):
++    full_name: str
++    email: EmailStr
++    password: str
++    barangay_name: str
++    contact_number: Optional[str] = None
++
++    @field_validator("email")
++    @classmethod
++    def check_gmail(cls, v: str) -> str:
++        return validate_gmail_email(v)
++
++    @field_validator("password")
++    @classmethod
++    def check_strength(cls, v): return validate_strong_password(v)
++
++    @field_validator("full_name", "barangay_name")
++    @classmethod
++    def not_blank(cls, v: str) -> str:
++        v = (v or "").strip()
++        if not v:
++            raise ValueError("This field is required.")
++        return v
++
++
+ class RegisterOsasRequest(BaseModel):
+     full_name: str
+     email: EmailStr
+@@ -298,6 +333,13 @@
+     full_name: Optional[str] = None
+     course_section: Optional[str] = None
+     gender: Optional[Literal["male", "female", "prefer_not_to_say"]] = None
++    # Boarding house + landlord are editable from the profile too. name and
++    # barangay have to be sent together; the landlord fields can be sent as
++    # null/"" to clear them.
++    boarding_house_name: Optional[str] = None
++    boarding_house_barangay: Optional[str] = None
++    landlord_name: Optional[str] = None
++    landlord_contact: Optional[str] = None
+ 
+ 
+ # ─── Tally report ─────────────────────────────────────────────────────────────
+@@ -398,6 +440,10 @@
+     latitude: Optional[float] = None
+     longitude: Optional[float] = None
+ 
++class SOSLocationUpdate(BaseModel):
++    latitude: float = Field(ge=-90, le=90)
++    longitude: float = Field(ge=-180, le=180)
++
+ class EmergencyStatusUpdate(BaseModel):
+     status: str
+     note: Optional[str] = None

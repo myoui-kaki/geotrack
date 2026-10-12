@@ -4,7 +4,9 @@
 // to justify a hamburger + slide-in drawer. On mobile they're shown
 // directly as a fixed bottom tab bar instead (one tap, no menu to open
 // first). Desktop keeps the same docked sidebar as OSAS for consistency.
+import { useEffect, useState } from "react";
 import { useNavigate, useLocation, NavLink, Outlet } from "react-router-dom";
+import { api } from "../../api/client";
 import { useAuth } from "../../context/AuthContext";
 import InstallAppButton from "../../components/InstallAppButton";
 import PortalFooter from "../../components/PortalFooter";
@@ -21,10 +23,38 @@ const NAV_ITEMS = [
 // main destinations).
 const DESKTOP_NAV_ITEMS = [...NAV_ITEMS, ["/barangay/profile", "Profile"]];
 
+// Counts shown next to the nav items so new work is noticed without opening
+// each page: open emergencies, and concerns OSAS has forwarded but that are
+// not resolved yet. Refreshes in the background.
+function useAlertCounts() {
+  const [counts, setCounts] = useState({ emergencies: 0, concerns: 0 });
+  useEffect(() => {
+    let alive = true;
+    const load = () => Promise.all([api.barangay.listEmergencies(), api.barangay.listConcerns()])
+      .then(([e, c]) => alive && setCounts({
+        emergencies: e.filter(x => x.status === "Active" || x.status === "Responding").length,
+        concerns: c.filter(x => x.status !== "resolved").length,
+      }))
+      .catch(() => {});
+    load();
+    const t = setInterval(() => { if (document.visibilityState === "visible") load(); }, 15000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+  return counts;
+}
+
+function CountBadge({ n }) {
+  if (!n) return null;
+  return <span style={{ marginLeft:6, minWidth:18, padding:"0 6px", borderRadius:9, background:"#c0392b", color:"#fff",
+                        fontSize:10.5, fontWeight:700, lineHeight:"18px", display:"inline-block", textAlign:"center" }}>{n}</span>;
+}
+
 export default function BarangayLayout() {
   const { fullName, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const counts = useAlertCounts();
+  const badgeFor = (to) => to.endsWith("/emergencies") ? counts.emergencies : to.endsWith("/concerns") ? counts.concerns : 0;
 
   function handleLogout() {
     if (!window.confirm("Are you sure you want to sign out?")) return;
@@ -42,7 +72,7 @@ export default function BarangayLayout() {
           {DESKTOP_NAV_ITEMS.map(([to, label]) => (
             <NavLink key={to} to={to}
               className={({isActive}) => `osas-nav-item ${isActive?"active":""}`}>
-              <span className="dot"></span> {label}
+              <span className="dot"></span> {label}<CountBadge n={badgeFor(to)} />
             </NavLink>
           ))}
         </nav>
@@ -75,7 +105,7 @@ export default function BarangayLayout() {
           <NavLink key={to} to={to}
             className={({isActive}) => `brgy-tab ${isActive?"active":""}`}>
             <span className="brgy-tab-dot"></span>
-            <span>{shortLabel}</span>
+            <span>{shortLabel}<CountBadge n={badgeFor(to)} /></span>
           </NavLink>
         ))}
       </nav>

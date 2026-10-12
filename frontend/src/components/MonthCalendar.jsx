@@ -55,7 +55,7 @@ export default function MonthCalendar({ year, month, onSelect, minYear = 2019, m
   while (cells.length % 7 !== 0) cells.push(null);
 
   return (
-    <div style={{ background:"#fff", border:"1px solid var(--line)", borderRadius:12, padding:14, minWidth:280 }}>
+    <div style={{ background:"#fff", border:"1px solid var(--line)", borderRadius:12, padding:14, minWidth:0 }}>
       <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12, flexWrap:"wrap" }}>
         <select value={year} onChange={(e) => onSelect(parseInt(e.target.value), month)}
           style={{ fontSize:12.5, padding:"5px 6px" }}>

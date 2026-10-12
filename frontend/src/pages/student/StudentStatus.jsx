@@ -14,9 +14,22 @@
 // is replaced with a confirmation - it reopens automatically next month.
 // Past entries can still be edited or deleted from the list below.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
 import MonthCalendar, { monthLabel } from "../../components/MonthCalendar";
+import CalendarPopover from "../../components/CalendarPopover";
+import PinDropMap from "../../components/PinDropMap";
+
+async function geocode(address) {
+  const q = `${address}, San Pablo City, Laguna, Philippines`;
+  const res = await fetch(
+    `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`,
+    { headers: { "Accept-Language": "en" } }
+  );
+  if (!res.ok) throw new Error("Address lookup failed.");
+  const data = await res.json();
+  return data.length ? { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) } : null;
+}
 
 const now = new Date();
 
@@ -66,36 +79,29 @@ function MonthDropdown({ pastUpdates }) {
   const [open, setOpen] = useState(false);
   const [viewYear, setViewYear] = useState(now.getFullYear());
   const [viewMonth, setViewMonth] = useState(now.getMonth());
+  const btnRef = useRef(null);
   const submittedMonths = new Set(pastUpdates.map(u => u.month_label));
   const viewedLabel = monthLabel(viewYear, viewMonth);
 
   return (
-    <div className="field" style={{ position:"relative" }}>
+    <div className="field">
       <label>Current month</label>
-      <button type="button" className="btn" style={{ width:"100%", textAlign:"left", display:"flex", justifyContent:"space-between", alignItems:"center" }}
+      <button ref={btnRef} type="button" className="btn" aria-haspopup="dialog" aria-expanded={open}
+        style={{ width:"100%", textAlign:"left", display:"flex", justifyContent:"space-between", alignItems:"center" }}
         onClick={() => setOpen(v => !v)}>
         <span>📅 {CURRENT_MONTH}</span>
         <span style={{ color:"#a39c8a" }}>{open ? "▴" : "▾"}</span>
       </button>
-      {open && (
-        <>
-          {/* Tap anywhere outside to close, instead of it staying open and
-              floating over the rest of the page indefinitely. */}
-          <div onClick={() => setOpen(false)}
-            style={{ position:"fixed", inset:0, zIndex:19, background:"transparent" }} />
-          <div style={{
-            position:"absolute", top:"100%", left:0, marginTop:4, zIndex:20,
-            background:"#fff", border:"1px solid var(--line)", borderRadius:12,
-            boxShadow:"0 8px 24px rgba(28,43,36,.18)", padding:12,
-          }}>
-            <MonthCalendar year={viewYear} month={viewMonth} onSelect={(y,m) => { setViewYear(y); setViewMonth(m); }} />
-            <div style={{ marginTop:8, fontSize:12, color: submittedMonths.has(viewedLabel) ? "var(--ok)" : "#a39c8a" }}>
-              {viewedLabel}{viewedLabel === CURRENT_MONTH ? " (this month)" : ""}
-              {submittedMonths.has(viewedLabel) && " - already submitted"}
-            </div>
-          </div>
-        </>
-      )}
+      {/* Rendered in a portal so it can't be clipped or covered by the cards around it. */}
+      <CalendarPopover open={open} onClose={() => setOpen(false)} anchorRef={btnRef}>
+        <MonthCalendar year={viewYear} month={viewMonth} onSelect={(y,m) => { setViewYear(y); setViewMonth(m); }} />
+        <div style={{ marginTop:8, fontSize:12, color: submittedMonths.has(viewedLabel) ? "var(--ok)" : "#a39c8a" }}>
+          {viewedLabel}{viewedLabel === CURRENT_MONTH ? " (this month)" : ""}
+          {submittedMonths.has(viewedLabel) && " - already submitted"}
+        </div>
+        <button type="button" className="btn" style={{ width:"100%", marginTop:10, fontSize:12 }}
+          onClick={() => setOpen(false)}>Done</button>
+      </CalendarPopover>
     </div>
   );
 }
@@ -221,8 +227,13 @@ function EditUpdateForm({ update, onCancel, onSaved, onError }) {
 
 export default function StudentStatus() {
   const [statusType, setStatusType] = useState("same");
+  const [autoDefaulted, setAutoDefaulted] = useState(false);
   const [newBoardingHouseName, setNewBoardingHouseName] = useState("");
   const [newBarangay, setNewBarangay] = useState("");
+  const [newLat, setNewLat] = useState(null);
+  const [newLng, setNewLng] = useState(null);
+  const [geocoding, setGeocoding] = useState(false);
+  const [geocodeError, setGeocodeError] = useState("");
   const [note, setNote] = useState("");
   const [amenities, setAmenities] = useState([]);
   const [photoDataUrl, setPhotoDataUrl] = useState(null);
@@ -238,6 +249,21 @@ export default function StudentStatus() {
   useEffect(() => {
     loadUpdates();
   }, []);
+
+  // A student with NO status update history yet has nothing to be "still
+  // the same" as - defaulting the dropdown to "same" for them meant the
+  // boarding-house name/location fields never even appeared, so they'd
+  // submit with no boarding house at all and the home map would stay
+  // empty forever with no indication anything was wrong. Default
+  // first-timers straight to "transferred" instead, so the fields they
+  // actually need are visible from the start. Only runs once, right after
+  // the initial load, so it never overrides a choice the student already made.
+  useEffect(() => {
+    if (!loading && !autoDefaulted) {
+      if (pastUpdates.length === 0) setStatusType("transferred");
+      setAutoDefaulted(true);
+    }
+  }, [loading, pastUpdates, autoDefaulted]);
 
   async function loadUpdates() {
     setLoading(true);
@@ -272,6 +298,19 @@ export default function StudentStatus() {
     }
   }
 
+  async function handleFindLocation() {
+    if (!newBarangay.trim()) { setGeocodeError("Enter at least a barangay first."); return; }
+    setGeocoding(true); setGeocodeError("");
+    try {
+      const addr = newBoardingHouseName.trim()
+        ? `${newBoardingHouseName}, ${newBarangay}` : newBarangay;
+      const res = await geocode(addr);
+      if (!res) setGeocodeError("Address not found - tap the map below to drop the pin yourself instead.");
+      else { setNewLat(res.lat); setNewLng(res.lng); }
+    } catch (err) { setGeocodeError(err.message); }
+    finally { setGeocoding(false); }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
@@ -297,6 +336,8 @@ export default function StudentStatus() {
         status_type: statusType,
         new_boarding_house_name: statusType === "transferred" ? newBoardingHouseName : null,
         new_barangay: statusType === "transferred" ? newBarangay : null,
+        new_boarding_house_latitude: statusType === "transferred" ? newLat : null,
+        new_boarding_house_longitude: statusType === "transferred" ? newLng : null,
         note: note || null,
         month_label: CURRENT_MONTH,
         photo_data_url: showDocumentation ? (photoDataUrl || null) : null,
@@ -306,6 +347,8 @@ export default function StudentStatus() {
       setNote("");
       setNewBoardingHouseName("");
       setNewBarangay("");
+      setNewLat(null);
+      setNewLng(null);
       setAmenities([]);
       setPhotoDataUrl(null);
       loadUpdates();
@@ -384,6 +427,20 @@ export default function StudentStatus() {
                     onChange={(e) => setNewBarangay(e.target.value)}
                     placeholder="e.g. Brgy. San Benito"
                     required
+                  />
+                </div>
+
+                <div className="field">
+                  <label>Pin the location on the map</label>
+                  <button type="button" className="btn" style={{ width: "100%", padding: 10, marginBottom: 8 }}
+                    onClick={handleFindLocation} disabled={geocoding || !newBarangay.trim()}>
+                    {geocoding ? "Finding location..." : "Find location on map"}
+                  </button>
+                  {geocodeError && <div style={{ fontSize: 11, color: "var(--pin)", marginBottom: 8 }}>{geocodeError}</div>}
+                  <PinDropMap
+                    latitude={newLat}
+                    longitude={newLng}
+                    onChange={({ lat, lng }) => { setNewLat(lat); setNewLng(lng); }}
                   />
                 </div>
               </>

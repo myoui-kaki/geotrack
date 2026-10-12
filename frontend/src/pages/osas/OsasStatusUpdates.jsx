@@ -1,7 +1,8 @@
 // src/pages/osas/OsasStatusUpdates.jsx - with search + filter panel
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
 import MonthCalendar, { monthLabel } from "../../components/MonthCalendar";
+import CalendarPopover from "../../components/CalendarPopover";
 
 function MonthFilterDropdown({ month, onChange }) {
   const now = new Date();
@@ -9,31 +10,25 @@ function MonthFilterDropdown({ month, onChange }) {
   const [viewYear, setViewYear] = useState(now.getFullYear());
   const [viewMonth, setViewMonth] = useState(now.getMonth());
 
+  const btnRef = useRef(null);
+
   return (
-    <div style={{ position:"relative" }}>
-      <button type="button" className="btn" style={{ minWidth:170, textAlign:"left", display:"flex", justifyContent:"space-between", alignItems:"center" }}
+    <div>
+      <button ref={btnRef} type="button" className="btn" aria-haspopup="dialog" aria-expanded={open}
+        style={{ minWidth:170, textAlign:"left", display:"flex", justifyContent:"space-between", alignItems:"center" }}
         onClick={() => setOpen(v => !v)}>
         <span>📅 {month || "All months"}</span>
         <span style={{ color:"#a39c8a" }}>{open ? "▴" : "▾"}</span>
       </button>
-      {open && (
-        <>
-          <div onClick={() => setOpen(false)} style={{ position:"fixed", inset:0, zIndex:19, background:"transparent" }} />
-          <div style={{
-            position:"absolute", top:"100%", left:0, marginTop:4, zIndex:20,
-            background:"#fff", border:"1px solid var(--line)", borderRadius:12,
-            boxShadow:"0 8px 24px rgba(28,43,36,.18)", padding:12,
-          }}>
-            <MonthCalendar year={viewYear} month={viewMonth} onSelect={(y,m) => {
-              setViewYear(y); setViewMonth(m); onChange(monthLabel(y, m)); setOpen(false);
-            }} />
-            <button type="button" className="btn" style={{ width:"100%", marginTop:8, fontSize:12 }}
-              onClick={() => { onChange(""); setOpen(false); }}>
-              Clear (show all months)
-            </button>
-          </div>
-        </>
-      )}
+      <CalendarPopover open={open} onClose={() => setOpen(false)} anchorRef={btnRef}>
+        <MonthCalendar year={viewYear} month={viewMonth} onSelect={(y,m) => {
+          setViewYear(y); setViewMonth(m); onChange(monthLabel(y, m)); setOpen(false);
+        }} />
+        <button type="button" className="btn" style={{ width:"100%", marginTop:8, fontSize:12 }}
+          onClick={() => { onChange(""); setOpen(false); }}>
+          Clear (show all months)
+        </button>
+      </CalendarPopover>
     </div>
   );
 }
