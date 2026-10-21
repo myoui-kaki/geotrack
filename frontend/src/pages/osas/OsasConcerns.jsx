@@ -41,7 +41,7 @@ export default function OsasConcerns() {
       <div className="osas-main-head">
         <div>
           <div className="osas-main-title">Reported concerns</div>
-          <div className="osas-main-sub">Safety, landlord, and maintenance issues reported by students. Set a concern to <strong>active</strong> to open it and forward it to the student's barangay.</div>
+          <div className="osas-main-sub">Safety, landlord, and maintenance issues reported by students.</div>
         </div>
       </div>
 
@@ -93,7 +93,7 @@ export default function OsasConcerns() {
                         style={{ padding: "6px 8px", fontSize: 12 }}
                       >
                         {STATUS_OPTIONS.map((s) => (
-                          <option key={s} value={s}>{s === "in_progress" ? "active (forward to barangay)" : s.replace("_", " ")}</option>
+                          <option key={s} value={s}>{s.replace("_", " ")}</option>
                         ))}
                       </select>
                     </td>

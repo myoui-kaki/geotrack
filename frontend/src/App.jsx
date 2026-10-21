@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import GeoTrackSplash from "./components/GeoTrackSplash";
+import { DialogHost } from "./components/dialogs";
 
 // Student pages
 import StudentLogin     from "./pages/student/StudentLogin";
@@ -41,6 +42,7 @@ export default function App() {
   return (
     <AuthProvider>
       <GeoTrackSplash />
+      <DialogHost />
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Navigate to="/student/login" replace />} />

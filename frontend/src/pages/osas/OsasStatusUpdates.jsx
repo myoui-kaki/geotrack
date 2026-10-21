@@ -1,8 +1,8 @@
 // src/pages/osas/OsasStatusUpdates.jsx - with search + filter panel
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../../api/client";
 import MonthCalendar, { monthLabel } from "../../components/MonthCalendar";
-import CalendarPopover from "../../components/CalendarPopover";
+import { dialog } from "../../components/dialogs";
 
 function MonthFilterDropdown({ month, onChange }) {
   const now = new Date();
@@ -10,25 +10,31 @@ function MonthFilterDropdown({ month, onChange }) {
   const [viewYear, setViewYear] = useState(now.getFullYear());
   const [viewMonth, setViewMonth] = useState(now.getMonth());
 
-  const btnRef = useRef(null);
-
   return (
-    <div>
-      <button ref={btnRef} type="button" className="btn" aria-haspopup="dialog" aria-expanded={open}
-        style={{ minWidth:170, textAlign:"left", display:"flex", justifyContent:"space-between", alignItems:"center" }}
+    <div style={{ position:"relative" }}>
+      <button type="button" className="btn" style={{ minWidth:170, textAlign:"left", display:"flex", justifyContent:"space-between", alignItems:"center" }}
         onClick={() => setOpen(v => !v)}>
         <span>📅 {month || "All months"}</span>
         <span style={{ color:"#a39c8a" }}>{open ? "▴" : "▾"}</span>
       </button>
-      <CalendarPopover open={open} onClose={() => setOpen(false)} anchorRef={btnRef}>
-        <MonthCalendar year={viewYear} month={viewMonth} onSelect={(y,m) => {
-          setViewYear(y); setViewMonth(m); onChange(monthLabel(y, m)); setOpen(false);
-        }} />
-        <button type="button" className="btn" style={{ width:"100%", marginTop:8, fontSize:12 }}
-          onClick={() => { onChange(""); setOpen(false); }}>
-          Clear (show all months)
-        </button>
-      </CalendarPopover>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position:"fixed", inset:0, zIndex:19, background:"transparent" }} />
+          <div style={{
+            position:"absolute", top:"100%", left:0, marginTop:4, zIndex:20,
+            background:"#fff", border:"1px solid var(--line)", borderRadius:12,
+            boxShadow:"0 8px 24px rgba(28,43,36,.18)", padding:12,
+          }}>
+            <MonthCalendar year={viewYear} month={viewMonth} onSelect={(y,m) => {
+              setViewYear(y); setViewMonth(m); onChange(monthLabel(y, m)); setOpen(false);
+            }} />
+            <button type="button" className="btn" style={{ width:"100%", marginTop:8, fontSize:12 }}
+              onClick={() => { onChange(""); setOpen(false); }}>
+              Clear (show all months)
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -62,9 +68,13 @@ export default function OsasStatusUpdates() {
   }
 
   async function handleFlag(uid) {
-    const reason = window.prompt("Reason for flagging this student?");
+    const reason = await dialog.prompt({
+      title:"Flag this student?",
+      message:"The student will be marked for OSAS follow-up. The reason is saved in the activity log.",
+      confirmText:"Flag student", variant:"danger",
+      reasonLabel:"Reason for flagging", reasonPlaceholder:"e.g. Missed 3 monthly updates"
+    });
     if (!reason) return;
-    if (!window.confirm(`Flag this student?\nReason: ${reason}`)) return;
     try { await api.osas.flagStatusUpdate(uid, reason); load(); }
     catch(err) { setError(err.message); }
   }
@@ -105,9 +115,9 @@ export default function OsasStatusUpdates() {
             <MonthFilterDropdown month={month} onChange={setMonth} />
           </div>
           <div className="field" style={{marginBottom:0}}>
-            <label>Gender</label>
+            <label>Sex</label>
             <select value={gender} onChange={e => setGender(e.target.value)}>
-              <option value="">All genders</option>
+              <option value="">All sexes</option>
               <option value="male">Male</option>
               <option value="female">Female</option>
             </select>

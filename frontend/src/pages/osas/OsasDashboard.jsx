@@ -51,7 +51,7 @@ export default function OsasDashboard() {
               { label:"Total students",       val:stats.total_students,         tag:"registered accounts",  color:"var(--ink)" },
               { label:"Updates submitted",    val:stats.updates_submitted,      tag:"all-time total",       color:"var(--ink)" },
               { label:"Flagged students",     val:stats.flagged_students,       tag:"needs follow-up",      color:"var(--pin)" },
-              { label:"Pending verifications",val:stats.pending_verifications,  tag:"boarding houses",      color:"var(--warn)" },
+              { label:"Unverified boarding houses",val:stats.pending_verifications,  tag:"boarding houses",      color:"var(--warn)" },
             ].map(s => (
               <div className="card osas-stat-card" key={s.label}>
                 <div className="stat-label">{s.label}</div>
@@ -92,7 +92,7 @@ export default function OsasDashboard() {
           {/* -- Charts -- */}
           <div className="osas-grid osas-two-col" style={{marginBottom:18}}>
             <div className="card">
-              <div className="panel-title">Students by gender</div>
+              <div className="panel-title">Students by sex</div>
               {stats.by_gender.length === 0
                 ? <div className="review-empty">No data yet.</div>
                 : <ResponsiveContainer width="100%" height={220}>

@@ -4,7 +4,6 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import { useAuth } from "../../context/AuthContext";
 import GoogleSignInButton from "../../components/GoogleSignInButton";
-import PinDropMap from "../../components/PinDropMap";
 import { STUDENT_TERMS as TERMS } from "../../components/termsText";
 import "./student.css";
 
@@ -237,7 +236,7 @@ export default function StudentLogin() {
               <input value={courseSection} onChange={e => setCourseSection(e.target.value)} placeholder="e.g. BSIT-3A" />
             </div>
             <div className="field">
-              <label>Gender <span style={{ color:"#a39c8a" }}>(optional)</span></label>
+              <label>Sex <span style={{ color:"#a39c8a" }}>(optional)</span></label>
               <select value={gender} onChange={e => setGender(e.target.value)}>
                 <option value="">Prefer not to say</option>
                 <option value="male">Male</option>
@@ -275,19 +274,16 @@ export default function StudentLogin() {
               <p style={{ fontSize:11, color:"#a39c8a", lineHeight:1.5, marginTop:-4, marginBottom:10 }}>
                 If OSAS doesn't have this on file yet for your boarding house, it will fill in automatically from what you provide here.
               </p>
-              <div className="field">
-                <label>Pin the location on the map</label>
-                <button type="button" className="btn" style={{ width:"100%", padding:10, marginBottom:8 }}
-                  onClick={handleFindLocation} disabled={geocoding || !bhBarangay.trim()}>
-                  {geocoding ? "Finding location..." : "Find location on map"}
-                </button>
-                {geocodeError && <div style={{ fontSize:11, color:"var(--pin)", marginBottom:8 }}>{geocodeError}</div>}
-                <PinDropMap
-                  latitude={pinnedLocation?.lat ?? null}
-                  longitude={pinnedLocation?.lng ?? null}
-                  onChange={({ lat, lng }) => setPinnedLocation({ lat, lng, displayName: `${lat.toFixed(5)}, ${lng.toFixed(5)}` })}
-                />
-              </div>
+              <button type="button" className="btn" style={{ width:"100%", padding:10 }}
+                onClick={handleFindLocation} disabled={geocoding || !bhBarangay.trim()}>
+                {geocoding ? "Finding location..." : "Find location on map"}
+              </button>
+              {geocodeError && <div style={{ fontSize:11, color:"var(--pin)", marginTop:6 }}>{geocodeError}</div>}
+              {pinnedLocation && (
+                <div style={{ marginTop:8, padding:"7px 10px", background:"#e1f0e6", borderRadius:8, fontSize:11.5, color:"var(--ok)" }}>
+                  Pinned: {pinnedLocation.displayName}
+                </div>
+              )}
             </div>
 
             <div style={{ marginBottom:14 }}>

@@ -131,6 +131,7 @@ export const api = {
     updateBoardingHouse:(hid,p)      => request(`/osas/boarding-houses/${hid}`,{method:"PUT",body:p}),
     deleteBoardingHouse:hid          => request(`/osas/boarding-houses/${hid}`,{method:"DELETE"}),
     verifyBoardingHouse:hid          => request(`/osas/boarding-houses/${hid}/verify`,{method:"PATCH"}),
+    unverifyBoardingHouse:(hid,reason) => request(`/osas/boarding-houses/${hid}/unverify`,{method:"POST",body:{reason}}),
     rejectBoardingHouse:(hid,reason) => request(`/osas/boarding-houses/${hid}/reject`,{method:"POST",body:{reason}}),
     sendAnnouncement:   p             => request("/osas/announcements",{method:"POST",body:p}),
     announcementHistory:()            => request("/osas/announcements/history"),

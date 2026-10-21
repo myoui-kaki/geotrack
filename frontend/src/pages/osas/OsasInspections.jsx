@@ -5,6 +5,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "../../api/client";
+import { dialog } from "../../components/dialogs";
 
 const DEFAULT_CHECKLIST = [
   "Fire exits clear and accessible",
@@ -82,7 +83,7 @@ export default function OsasInspections() {
   }
 
   async function handleCancel(id) {
-    if (!window.confirm("Cancel this scheduled inspection?")) return;
+    if (!(await dialog.confirm({ title:"Cancel this inspection?", message:"The scheduled inspection will be cancelled.", confirmText:"Cancel inspection", cancelText:"Keep it", variant:"danger" }))) return;
     try { await api.osas.cancelInspection(id); load(); } catch (err) { setError(err.message); }
   }
 

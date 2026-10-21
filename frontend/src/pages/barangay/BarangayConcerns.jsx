@@ -13,14 +13,10 @@ export default function BarangayConcerns() {
   const [expandedId, setExpandedId] = useState(null);
 
   useEffect(() => {
-    let alive = true;
-    const load = (silent) => api.barangay.listConcerns()
-      .then(d => { if (alive) { setConcerns(d); setError(""); } })
-      .catch(err => { if (alive && !silent) setError(err.message); })
-      .finally(() => { if (alive && !silent) setLoading(false); });
-    load(false);
-    const t = setInterval(() => { if (document.visibilityState === "visible") load(true); }, 15000);
-    return () => { alive = false; clearInterval(t); };
+    api.barangay.listConcerns()
+      .then(setConcerns)
+      .catch(err => setError(err.message))
+      .finally(() => setLoading(false));
   }, []);
 
   return (
@@ -29,8 +25,8 @@ export default function BarangayConcerns() {
         <div>
           <div className="osas-main-title">Reported concerns</div>
           <div className="osas-main-sub">
-            Concerns from students currently boarding in your barangay that OSAS has opened and
-            forwarded to you, including any photo documentation and amenities checklist they attached.
+            Concerns filed by students currently boarding in your barangay, including any photo
+            documentation and amenities checklist they attached.
           </div>
         </div>
       </div>
@@ -39,7 +35,7 @@ export default function BarangayConcerns() {
 
       <div className="card">
         {loading ? <div className="loading-text">Loading...</div>
-        : concerns.length === 0 ? <div className="review-empty">No concerns forwarded by OSAS yet. A student's concern appears here once OSAS opens it.</div>
+        : concerns.length === 0 ? <div className="review-empty">No reported concerns from your barangay yet.</div>
         : concerns.map(c => (
             <div key={c.id} style={{ padding:"12px 0", borderBottom:"1px solid #ece7da" }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
@@ -49,7 +45,7 @@ export default function BarangayConcerns() {
                     {c.student_name} - {new Date(c.created_at).toLocaleString()}
                   </span>
                 </div>
-                <span className={`badge ${c.status === "resolved" ? "ok" : "pending"}`}>{c.status === "in_progress" ? "active" : c.status}</span>
+                <span className={`badge ${c.status === "resolved" ? "ok" : "pending"}`}>{c.status}</span>
               </div>
               <p style={{ fontSize:12.5, color:"#544f43", marginTop:6 }}>{c.details}</p>
               {(c.photo_data_url || c.amenities_checklist) && (

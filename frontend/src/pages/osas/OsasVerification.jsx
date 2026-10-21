@@ -8,6 +8,7 @@ import { MapContainer, TileLayer, Marker } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { api } from "../../api/client";
+import ConfirmDialog from "../../components/ConfirmDialog";
 
 const pinIcon = new L.Icon({
   iconUrl:"https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
@@ -51,17 +52,56 @@ export default function OsasVerification() {
       .finally(() => setLoading(false));
   }
 
-  async function handleVerify(hid) {
-    if (!window.confirm("Mark this boarding house as verified?")) return;
-    try { await api.osas.verifyBoardingHouse(hid); load(); }
-    catch(err) { setError(err.message); }
+  // ── Centered confirmation popups (verify / reject / unverify / delete) ──
+  const [dialog, setDialog] = useState(null);   // { kind, house }
+  const [dialogBusy, setDialogBusy] = useState(false);
+
+  const DIALOGS = {
+    verify: h => ({
+      title: "Verify this boarding house?",
+      message: h.outside_coverage
+        ? `${h.name} is outside the barangay permit portal's coverage, so OSAS will verify it directly.`
+        : `${h.name} will be marked as verified and the student who submitted it will be notified.`,
+      confirmText: "Verify", variant: "primary",
+    }),
+    reject: h => ({
+      title: "Reject this boarding house?",
+      message: `${h.name} will be marked as Rejected. The reason below is shown to the student who submitted it.`,
+      confirmText: "Reject", variant: "danger",
+      requireReason: true, reasonLabel: "Reason for rejection",
+      reasonPlaceholder: "e.g. No business permit, address could not be found...",
+    }),
+    unverify: h => ({
+      title: "Remove verification?",
+      message: `${h.name} will go back to Unverified. Tell the student why.`,
+      confirmText: "Remove verification", variant: "danger",
+      requireReason: true, reasonLabel: "Reason",
+      reasonPlaceholder: "e.g. Permit expired, inspection failed...",
+    }),
+    delete: h => ({
+      title: "Delete this boarding house?",
+      message: `${h.name} and all of its reviews will be permanently removed.`,
+      confirmText: "Delete", variant: "danger",
+    }),
+  };
+
+  async function runDialog(reason) {
+    if (!dialog) return;
+    const { kind, house } = dialog;
+    setDialogBusy(true); setError("");
+    try {
+      if (kind === "verify")        await api.osas.verifyBoardingHouse(house.id);
+      else if (kind === "reject")   await api.osas.rejectBoardingHouse(house.id, reason);
+      else if (kind === "unverify") await api.osas.unverifyBoardingHouse(house.id, reason);
+      else if (kind === "delete")   await api.osas.deleteBoardingHouse(house.id);
+      setDialog(null); load();
+    } catch(err) { setError(err.message); setDialog(null); }
+    finally { setDialogBusy(false); }
   }
 
-  async function handleReject(hid) {
-    const reason = window.prompt("Reason for rejecting this boarding house (optional):", "");
-    if (reason === null) return; // cancelled
-    try { await api.osas.rejectBoardingHouse(hid, reason); load(); }
-    catch(err) { setError(err.message); }
+  function daysLeft(due) {
+    if (!due) return null;
+    return Math.ceil((new Date(due).getTime() - Date.now()) / 86400000);
   }
 
   function startEdit(h) {
@@ -96,12 +136,6 @@ export default function OsasVerification() {
       });
       setEditingId(null); load();
     } catch(err) { setError(err.message); }
-  }
-
-  async function handleDelete(hid) {
-    if (!window.confirm("Delete this boarding house? This also removes its reviews.")) return;
-    try { await api.osas.deleteBoardingHouse(hid); load(); }
-    catch(err) { setError(err.message); }
   }
 
   async function toggleReviews(hid) {
@@ -186,19 +220,40 @@ export default function OsasVerification() {
                         <td style={{fontSize:12,color:"#6b6457"}}>{h.contact_person||"-"}</td>
                         <td style={{fontSize:12,color:"#6b6457"}}>{h.contact_number||"-"}</td>
                         <td style={{fontSize:12,color:"#6b6457"}}>{h.submitted_by||"-"}</td>
-                        <td>
-                          <span className={`badge ${h.is_verified?"ok":"pending"}`}>{h.is_verified?"Verified":"Pending"}</span>
+                        <td style={{maxWidth:230}}>
+                          {h.verification_status === "verified" && <span className="badge ok">Verified</span>}
+                          {h.verification_status === "unverified" && <span className="badge pending">Unverified</span>}
+                          {h.verification_status === "rejected" && <span className="badge rejected">Rejected</span>}
+
                           {h.has_barangay_permit && <div style={{fontSize:10,color:"var(--moss-dark)",marginTop:2}}>Barangay-confirmed permit</div>}
+
+                          {h.verification_status === "unverified" && h.outside_coverage && (() => {
+                            const d = daysLeft(h.verification_due);
+                            return (
+                              <div style={{fontSize:11,marginTop:4,color: d < 0 ? "var(--pin)" : "#8a6a1f"}}>
+                                Outside Brgy. Del Remedio - OSAS verifies directly.{" "}
+                                <b>{d < 0 ? "Past 7 days - will be auto-rejected" : d === 0 ? "Due today - auto-rejects after this" : `${d} day${d===1?"":"s"} left`}</b>
+                              </div>
+                            );
+                          })()}
+                          {h.verification_status === "unverified" && !h.outside_coverage && (
+                            <div style={{fontSize:11,marginTop:4,color:"#857d6c"}}>Awaiting barangay permit confirmation.</div>
+                          )}
+                          {h.verification_remarks && h.verification_status !== "verified" && (
+                            <div style={{fontSize:11,marginTop:4,color:"#6b6457",whiteSpace:"normal"}}>
+                              <b>Remarks:</b> {h.verification_remarks}
+                            </div>
+                          )}
                         </td>
                         <td style={{whiteSpace:"nowrap"}}>
-                          {!h.is_verified && <button className="btn primary" style={{padding:"5px 10px",fontSize:11,marginRight:4}} onClick={() => handleVerify(h.id)}>Verify</button>}
-                          {h.is_verified && <button className="btn" style={{padding:"5px 10px",fontSize:11,marginRight:4,color:"var(--pin)"}} onClick={() => handleReject(h.id)}>Unverify</button>}
-                          {!h.is_verified && <button className="btn" style={{padding:"5px 10px",fontSize:11,marginRight:4,color:"var(--pin)"}} onClick={() => handleReject(h.id)}>Reject</button>}
+                          {h.verification_status !== "verified" && <button className="btn primary" style={{padding:"5px 10px",fontSize:11,marginRight:4}} onClick={() => setDialog({kind:"verify",house:h})}>Verify</button>}
+                          {h.verification_status === "verified" && <button className="btn" style={{padding:"5px 10px",fontSize:11,marginRight:4,color:"var(--pin)"}} onClick={() => setDialog({kind:"unverify",house:h})}>Unverify</button>}
+                          {h.verification_status === "unverified" && <button className="btn" style={{padding:"5px 10px",fontSize:11,marginRight:4,color:"var(--pin)"}} onClick={() => setDialog({kind:"reject",house:h})}>Reject</button>}
                           <button className="btn" style={{padding:"5px 10px",fontSize:11,marginRight:4}} onClick={() => toggleReviews(h.id)}>
                             {expandedHouseId===h.id?"Hide reviews":"Reviews"}
                           </button>
                           <button className="btn" style={{padding:"5px 10px",fontSize:11,marginRight:4}} onClick={() => startEdit(h)}>Edit</button>
-                          <button className="btn" style={{padding:"5px 10px",fontSize:11,color:"var(--pin)"}} onClick={() => handleDelete(h.id)}>Delete</button>
+                          <button className="btn" style={{padding:"5px 10px",fontSize:11,color:"var(--pin)"}} onClick={() => setDialog({kind:"delete",house:h})}>Delete</button>
                         </td>
                       </>
                     )}
@@ -226,6 +281,16 @@ export default function OsasVerification() {
           </table>
         )}
       </div>
+
+      {dialog && (
+        <ConfirmDialog
+          open
+          {...DIALOGS[dialog.kind](dialog.house)}
+          busy={dialogBusy}
+          onConfirm={runDialog}
+          onCancel={() => setDialog(null)}
+        />
+      )}
     </>
   );
 }

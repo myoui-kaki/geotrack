@@ -78,7 +78,8 @@ export default function StudentDirectory() {
         <h2>Boarding house directory</h2>
         <p style={{ fontSize:12.5, color:"#857d6c", marginTop:6 }}>
           A "Verified" boarding house has a confirmed business permit on file with its barangay.
-          "Pending" means the permit has not been confirmed yet.
+          "Unverified" means it has not been verified yet. "Rejected" houses (only visible to the
+          student who submitted them) show the remarks from OSAS.
         </p>
       </div>
 
@@ -134,10 +135,22 @@ export default function StudentDirectory() {
       }}>
          View student reviews →
       </div>
+
+      {h.verification_status === "rejected" && h.verification_remarks && (
+        <div style={{marginTop:8, padding:"8px 10px", borderRadius:8, background:"#fbe6e0",
+                     color:"#8f2a08", fontSize:12, lineHeight:1.45}}>
+          <b>Remarks from OSAS:</b> {h.verification_remarks}
+        </div>
+      )}
+      {h.verification_status === "unverified" && h.verification_remarks && (
+        <div style={{marginTop:8, fontSize:12, color:"#6b6457"}}>
+          <b>Remarks:</b> {h.verification_remarks}
+        </div>
+      )}
     </div>
 
-    <span className={`badge ${h.is_verified ? "ok" : "pending"}`}>
-      {h.is_verified ? "Verified" : "Pending"}
+    <span className={`badge ${h.verification_status === "verified" ? "ok" : h.verification_status === "rejected" ? "rejected" : "pending"}`}>
+      {h.verification_status === "verified" ? "Verified" : h.verification_status === "rejected" ? "Rejected" : "Unverified"}
     </span>
   </div>
 ))

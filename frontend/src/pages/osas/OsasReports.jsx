@@ -3,6 +3,7 @@ import { useState } from "react";
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, LabelList } from "recharts";
 import { api, API_BASE_URL } from "../../api/client";
 import { toPng } from "html-to-image";
+import { dialog } from "../../components/dialogs";
 
 const MONTHS = [
   "",
@@ -14,12 +15,12 @@ const MONTHS = [
 ];
 const GROUP_OPTIONS = [
   { value:"boarding_house", label:"Boarding house (place name & barangay)" },
-  { value:"gender",         label:"Gender" },
+  { value:"gender",         label:"Sex" },
   { value:"department",     label:"Department (CCS, COE, CTE, ...)" },
   { value:"monthly_status", label:"Monthly status" },
 ];
 const SECTION_LABELS = { boarding_house:"Boarding house (place name & barangay)",
-  gender:"Gender", department:"Department", monthly_status:"Monthly status" };
+  gender:"Sex", department:"Department", monthly_status:"Monthly status" };
 const COLORS = ["#2f5d4f","#c1502e","#d4a017","#5a8a3c","#6b6457","#203f36","#e07b39","#3c7a5c"];
 
 // The backend labels boarding-house rows as "Name (Barangay)" so the chart
@@ -158,7 +159,7 @@ const response = await fetch(exportUrl, {
 
     window.URL.revokeObjectURL(url);
   } catch (err) {
-    alert(err.message);
+    dialog.alert({ title:"Export failed", message:err.message, variant:"danger" });
   }
 }
 
@@ -186,7 +187,7 @@ async function downloadCharts() {
   const node = document.getElementById("report-charts");
 
   if (!node) {
-    alert("Charts not found");
+    dialog.alert({ title:"Charts not found", message:"There are no charts to export yet.", variant:"danger" });
     return;
   }
 
@@ -203,7 +204,7 @@ async function downloadCharts() {
 
   } catch (err) {
     console.error(err);
-    alert("Failed to export charts");
+    dialog.alert({ title:"Export failed", message:"The charts could not be exported. Please try again.", variant:"danger" });
   }
 }
 
@@ -284,7 +285,7 @@ async function downloadCharts() {
                   try {
                     await handleDownloadNarrativeDocx(selected, monthLabel, narrative.narrative);
                   } catch (err) {
-                    alert(err.message);
+                    dialog.alert({ title:"Download failed", message:err.message, variant:"danger" });
                   }
                 }}>
                 Download as Word document

@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import { useAuth } from "../../context/AuthContext";
 import InstallAppButton from "../../components/InstallAppButton";
+import { dialog } from "../../components/dialogs";
 
 export default function BarangayProfile() {
   const { fullName: sessionFullName, logout, updateFullName } = useAuth();
@@ -40,8 +41,8 @@ export default function BarangayProfile() {
       .finally(() => setLoading(false));
   }, []);
 
-  function handleLogout() {
-    if (!window.confirm("Are you sure you want to sign out?")) return;
+  async function handleLogout() {
+    if (!(await dialog.confirm({ title:"Sign out?", message:"You'll need to sign in again to continue.", confirmText:"Sign out" }))) return;
     logout();
     navigate("/barangay/login");
   }

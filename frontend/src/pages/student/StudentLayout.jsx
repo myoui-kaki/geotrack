@@ -13,6 +13,7 @@ import { useAuth } from "../../context/AuthContext";
 import InstallAppButton from "../../components/InstallAppButton";
 import PortalFooter from "../../components/PortalFooter";
 import "./student.css";
+import { dialog } from "../../components/dialogs";
 
 export default function StudentLayout() {
   const navigate = useNavigate();
@@ -20,8 +21,8 @@ export default function StudentLayout() {
   const { logout, fullName } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
 
-  function handleLogout() {
-    if (!window.confirm("Are you sure you want to sign out?")) return;
+  async function handleLogout() {
+    if (!(await dialog.confirm({ title:"Sign out?", message:"You'll need to sign in again to continue.", confirmText:"Sign out" }))) return;
     logout();
     navigate("/student/login");
   }

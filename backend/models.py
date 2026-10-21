@@ -3,7 +3,7 @@ models.py — SQLAlchemy table definitions for GeoTrack.
 """
 from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey, DateTime, Text, JSON
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timedelta
 from database import Base
 
 
@@ -58,6 +58,17 @@ class User(Base):
     reset_tokens    = relationship("PasswordResetToken", back_populates="user",     cascade="all, delete-orphan")
 
 
+PARTICIPATING_BARANGAYS_MODEL = {"Brgy. Del Remedio"}
+VERIFICATION_WINDOW_DAYS = 7
+
+def _norm_brgy_name(name):
+    import re as _re
+    n = (name or "").lower().replace(".", " ")
+    for w in ("barangay", "brgy", "bgy"):
+        n = _re.sub(r"\b%s\b" % w, " ", n)
+    return " ".join(n.split())
+
+
 class BoardingHouse(Base):
     __tablename__ = "boarding_houses"
     id = Column(Integer, primary_key=True, index=True)
@@ -82,6 +93,34 @@ class BoardingHouse(Base):
     # valid permit. Anything outside a participating barangay is always
     # left unverified, regardless of what a student self-reports.
     has_barangay_permit = Column(Boolean, default=False)
+
+    # Verification workflow: "unverified" (default) -> "verified" or "rejected".
+    # rejected_at is set only for a rejection; verification_remarks holds the
+    # reason shown to the submitting student and to OSAS (required for reject
+    # / unverify / barangay "no valid permit").
+    rejected_at = Column(DateTime, nullable=True)
+    verification_remarks = Column(Text, nullable=True)
+
+    @property
+    def verification_status(self):
+        if self.is_verified: return "verified"
+        if self.rejected_at is not None: return "rejected"
+        return "unverified"
+
+    @property
+    def outside_coverage(self):
+        """True when no barangay portal covers this house (anything outside
+        Brgy. Del Remedio) - OSAS verifies those directly."""
+        return _norm_brgy_name(self.barangay) not in {_norm_brgy_name(b) for b in PARTICIPATING_BARANGAYS_MODEL}
+
+    @property
+    def verification_due(self):
+        """Outside-coverage submissions get a 1-week window for OSAS to
+        verify directly; None once verified/rejected or when a barangay
+        account handles it."""
+        if self.is_verified or self.rejected_at is not None or not self.outside_coverage:
+            return None
+        return (self.created_at or datetime.utcnow()) + timedelta(days=VERIFICATION_WINDOW_DAYS)
 
     status_updates = relationship("StatusUpdate", back_populates="boarding_house", cascade="all, delete-orphan")
     reviews        = relationship("Review",        back_populates="boarding_house", cascade="all, delete-orphan")

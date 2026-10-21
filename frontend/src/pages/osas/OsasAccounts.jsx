@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../../api/client";
 import { useAuth } from "../../context/AuthContext";
+import { dialog } from "../../components/dialogs";
 
 export default function OsasAccounts() {
   const { fullName } = useAuth();
@@ -51,7 +52,7 @@ export default function OsasAccounts() {
   }
 
   async function handleDeleteOsas(accountId) {
-    if (!window.confirm("Remove this OSAS account?")) return;
+    if (!(await dialog.confirm({ title:"Remove this OSAS account?", message:"The account will lose access immediately.", confirmText:"Remove", variant:"danger" }))) return;
     try {
       await api.osas.deleteAccount(accountId);
       load();
@@ -61,7 +62,7 @@ export default function OsasAccounts() {
   }
 
   async function handleDeleteStudent(studentId) {
-    if (!window.confirm("Remove this student account? This also removes their status updates, reviews, and concerns.")) return;
+    if (!(await dialog.confirm({ title:"Remove this student account?", message:"This also removes their status updates, reviews, and concerns.", confirmText:"Remove", variant:"danger" }))) return;
     try {
       await api.osas.deleteStudent(studentId);
       load();
@@ -71,7 +72,7 @@ export default function OsasAccounts() {
   }
 
   async function handleArchiveStudent(studentId) {
-    if (!window.confirm("Archive this student? They'll be marked inactive but kept in the system.")) return;
+    if (!(await dialog.confirm({ title:"Archive this student?", message:"They'll be marked inactive but kept in the system.", confirmText:"Archive" }))) return;
     try {
       await api.osas.archiveStudent(studentId);
       load();

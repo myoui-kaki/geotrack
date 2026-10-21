@@ -1,0 +1,45 @@
+/* Centered confirmation dialog - used instead of window.confirm/prompt */
+.cd-backdrop{
+  position:fixed; inset:0; z-index:1000;
+  background:rgba(20,32,26,.52); backdrop-filter:blur(2px);
+  display:flex; align-items:center; justify-content:center; padding:16px;
+  animation:cd-fade .16s ease-out;
+}
+.cd-card{
+  width:100%; max-width:440px; background:var(--card,#fff); color:var(--ink,#1f2a24);
+  border-radius:18px; padding:26px 26px 22px; text-align:center;
+  box-shadow:0 24px 60px rgba(0,0,0,.28), 0 2px 8px rgba(0,0,0,.12);
+  animation:cd-pop .2s cubic-bezier(.2,.9,.3,1.2);
+}
+.cd-icon{
+  width:54px; height:54px; border-radius:50%; margin:0 auto 14px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:26px; font-weight:700; line-height:1;
+}
+.cd-icon.danger{background:#fbe6e0; color:#c2410c;}
+.cd-icon.primary{background:#e3efe7; color:var(--moss-dark,#1f4d36);}
+.cd-title{font-size:19px; font-weight:700; margin-bottom:6px; font-family:var(--font-display,inherit);}
+.cd-msg{font-size:13.5px; line-height:1.5; color:#6b6457; margin-bottom:6px;}
+.cd-label{display:block; text-align:left; font-size:12px; font-weight:700; margin:14px 0 6px; color:#4c463a;}
+.cd-label .req{color:#c2410c;}
+.cd-input{
+  width:100%; min-height:84px; resize:vertical; box-sizing:border-box;
+  padding:10px 12px; font:inherit; font-size:13.5px; border-radius:10px;
+  border:1.5px solid var(--line,#ddd6c4); background:#fffdf8; outline:none;
+}
+.cd-input:focus{border-color:var(--moss,#2f6b4a); box-shadow:0 0 0 3px rgba(47,107,74,.15);}
+.cd-input.err{border-color:#c2410c;}
+.cd-err{text-align:left; color:#c2410c; font-size:12px; margin-top:5px;}
+.cd-actions{display:flex; gap:10px; margin-top:20px;}
+.cd-actions button{
+  flex:1; padding:11px 14px; border-radius:11px; font-size:13.5px; font-weight:700;
+  cursor:pointer; border:1.5px solid var(--line,#ddd6c4); background:#fff; color:inherit;
+  transition:transform .08s, filter .15s;
+}
+.cd-actions button:hover{filter:brightness(.97);}
+.cd-actions button:active{transform:scale(.98);}
+.cd-actions button:disabled{opacity:.6; cursor:default;}
+.cd-actions .cd-ok.primary{background:var(--moss-dark,#1f4d36); border-color:var(--moss-dark,#1f4d36); color:#fff;}
+.cd-actions .cd-ok.danger{background:#c2410c; border-color:#c2410c; color:#fff;}
+@keyframes cd-fade{from{opacity:0}to{opacity:1}}
+@keyframes cd-pop{from{opacity:0; transform:translateY(8px) scale(.94)}to{opacity:1; transform:none}}

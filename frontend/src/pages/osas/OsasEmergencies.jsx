@@ -39,23 +39,15 @@ export default function OsasEmergencies() {
   const [noteDraft, setNoteDraft] = useState("");
   const [savingId, setSavingId] = useState(null);
 
-  // silent=true is the background refresh: no spinner, so rows and any
-  // expanded map don't flicker while OSAS is working through a case.
-  function load(silent = false) {
-    if (!silent) setLoading(true);
+  function load() {
+    setLoading(true);
     api.osas.listEmergencies(filter === "All" ? null : filter)
-      .then(d => { setCases(d); if (silent) setError(""); })
-      .catch(err => { if (!silent) setError(err.message); })
-      .finally(() => { if (!silent) setLoading(false); });
+      .then(setCases)
+      .catch(err => setError(err.message))
+      .finally(() => setLoading(false));
   }
 
-  useEffect(() => {
-    load();
-    // New student alerts show up here on their own - no manual reload.
-    const t = setInterval(() => { if (document.visibilityState === "visible") load(true); }, 10000);
-    return () => clearInterval(t);
-    // eslint-disable-next-line
-  }, [filter]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [filter]);
 
   async function handleStatusChange(caseId, status) {
     setSavingId(caseId);
@@ -146,18 +138,10 @@ export default function OsasEmergencies() {
                     <td>{c.category}</td>
                     <td style={{ fontSize: 11.5 }}>
                       {c.latitude
-                        ? <>
-                            <button className="btn" style={{ fontSize:11.5, padding:"5px 10px" }}
-                              onClick={() => setExpandedId(expandedId === c.id ? null : c.id)}>
-                              📍 {expandedId === c.id ? "Hide map" : "View map"}
-                            </button>
-                            <div style={{ marginTop:4 }}>
-                              <a href={`https://www.openstreetmap.org/?mlat=${c.latitude}&mlon=${c.longitude}#map=17/${c.latitude}/${c.longitude}`}
-                                 target="_blank" rel="noreferrer" style={{ color:"var(--moss)" }}>
-                                {c.latitude.toFixed(5)}, {c.longitude.toFixed(5)}
-                              </a>
-                            </div>
-                          </>
+                        ? <a href={`https://www.openstreetmap.org/?mlat=${c.latitude}&mlon=${c.longitude}#map=17/${c.latitude}/${c.longitude}`}
+                             target="_blank" rel="noreferrer" style={{ color:"var(--moss)" }}>
+                            {c.latitude.toFixed(5)}, {c.longitude.toFixed(5)}
+                          </a>
                         : <span style={{ color:"#a39c8a" }}>Not shared</span>}
                     </td>
                     <td style={{ fontSize: 11.5 }}>{new Date(c.created_at).toLocaleString()}</td>
@@ -186,7 +170,7 @@ export default function OsasEmergencies() {
                             <strong>Student's note:</strong> {c.details}
                           </div>
                         )}
-                        <div className="panel-title" style={{ fontSize:12.5, marginBottom:8 }}>Location shared by the student</div>
+                        <div className="panel-title" style={{ fontSize:12.5, marginBottom:8 }}>Location when SOS was sent</div>
                         <EmergencyLocationMap latitude={c.latitude} longitude={c.longitude} />
                         <div className="panel-title" style={{ fontSize:12.5, margin:"16px 0 8px" }}>Timeline</div>
                         {c.timeline.map((e, i) => (

@@ -125,6 +125,7 @@ body{
 .badge.ok{background:#e1f0e6; color:var(--ok);}
 .badge.warn{background:var(--pin-soft); color:var(--pin);}
 .badge.pending{background:#eee7d2; color:#8a6d2f;}
+.badge.rejected{background:#fbe6e0; color:#b4330a;}
 
 .error-banner{
   background:var(--pin-soft); color:#7a3a23; padding:10px 14px; border-radius:8px;

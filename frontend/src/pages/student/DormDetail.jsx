@@ -11,6 +11,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { api } from "../../api/client";
 import LocationMap from "../../components/LocationMap";
 import BarangayContactLine from "../../components/BarangayContactLine";
+import { dialog } from "../../components/dialogs";
 
 export default function DormDetail() {
   const { houseId } = useParams();
@@ -88,7 +89,7 @@ export default function DormDetail() {
   }
 
   async function handleDeleteReview(reviewId) {
-    if (!window.confirm("Delete your review?")) return;
+    if (!(await dialog.confirm({ title:"Delete your review?", message:"This cannot be undone.", confirmText:"Delete", variant:"danger" }))) return;
     try {
       await api.student.deleteReview(reviewId);
       loadAll();

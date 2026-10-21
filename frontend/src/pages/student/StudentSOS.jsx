@@ -22,6 +22,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "../../api/client";
+import { dialog } from "../../components/dialogs";
 
 const CATEGORIES = ["Medical Emergency", "Safety Threat", "Fire", "Natural Disaster", "Other"];
 
@@ -140,8 +141,6 @@ export default function StudentSOS() {
   const [details, setDetails] = useState("");
   const [locationState, setLocationState] = useState("idle"); // idle | locating | ok | denied
   const [coords, setCoords] = useState(null);
-  const [shareLocation, setShareLocation] = useState(true);   // student's choice: share location with OSAS + barangay
-  const [sharing, setSharing] = useState(false);
   const [sending, setSending] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [offlineNotice, setOfflineNotice] = useState(false);
@@ -166,11 +165,6 @@ export default function StudentSOS() {
   }
 
   useEffect(() => { loadCases(); }, []);
-  // While an alert is open, keep it fresh so status changes from OSAS/barangay show up.
-  useEffect(() => {
-    const t = setInterval(() => { if (document.visibilityState === "visible") loadCases(); }, 15000);
-    return () => clearInterval(t);
-  }, []);
   useEffect(() => {
     // Best-effort - if this fails (offline, etc.) buildContacts() just
     // keeps using the static placeholder rows, so no error handling needed.
@@ -193,31 +187,7 @@ export default function StudentSOS() {
   function startConfirm(cat) {
     setCategory(cat);
     setConfirming(true);
-    if (shareLocation) requestLocation();
-  }
-
-  function toggleShare(on) {
-    setShareLocation(on);
-    if (on) requestLocation();
-    else { setCoords(null); setLocationState("idle"); }
-  }
-
-  // Share (or refresh) location on an alert that is already open.
-  function shareNow() {
-    if (!activeCase) return;
-    if (!navigator.geolocation) { setError("Location is not available on this device."); return; }
-    setSharing(true); setError("");
-    navigator.geolocation.getCurrentPosition(
-      async pos => {
-        try {
-          await api.student.shareSOSLocation(activeCase.id, { latitude: pos.coords.latitude, longitude: pos.coords.longitude });
-          loadCases();
-        } catch (err) { setError(err.message); }
-        finally { setSharing(false); }
-      },
-      () => { setSharing(false); setError("Couldn't get your location. Check that location access is allowed for this site."); },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
+    requestLocation();
   }
 
   async function handleSendSOS() {
@@ -227,8 +197,8 @@ export default function StudentSOS() {
       await api.student.triggerSOS({
         category,
         details: details.trim() || null,
-        latitude: shareLocation ? (coords?.latitude ?? null) : null,
-        longitude: shareLocation ? (coords?.longitude ?? null) : null,
+        latitude: coords?.latitude ?? null,
+        longitude: coords?.longitude ?? null,
       });
       setConfirming(false); setCategory(""); setDetails(""); setCoords(null); setLocationState("idle");
       loadCases();
@@ -245,7 +215,7 @@ export default function StudentSOS() {
 
   async function handleCancel() {
     if (!activeCase) return;
-    if (!window.confirm("Cancel this SOS alert? Only do this if it's a false alarm or you no longer need help.")) return;
+    if (!(await dialog.confirm({ title:"Cancel this SOS alert?", message:"Only do this if it's a false alarm or you no longer need help.", confirmText:"Cancel SOS", cancelText:"Keep it active", variant:"danger" }))) return;
     try {
       await api.student.cancelEmergency(activeCase.id);
       loadCases();
@@ -288,14 +258,11 @@ export default function StudentSOS() {
             {activeCase.details && (
               <p style={{ fontSize:12.5, color:"#544f43", marginTop:10 }}>{activeCase.details}</p>
             )}
-            <div style={{ fontSize:11.5, color: activeCase.latitude ? "#2f5d3f" : "#a39c8a", marginTop:8 }}>
+            <div style={{ fontSize:11, color:"#a39c8a", marginTop:8 }}>
               {activeCase.latitude
-                ? `📍 Location shared with OSAS and your barangay - ${activeCase.latitude.toFixed(5)}, ${activeCase.longitude.toFixed(5)}`
-                : "No location shared yet"}
+                ? `Location shared - ${activeCase.latitude.toFixed(5)}, ${activeCase.longitude.toFixed(5)}`
+                : "No location shared"}
             </div>
-            <button className="btn" style={{ marginTop:8, fontSize:12 }} onClick={shareNow} disabled={sharing}>
-              {sharing ? "Getting location..." : activeCase.latitude ? "Update my location" : "Share my location now"}
-            </button>
             <div style={{ borderTop:"1px solid var(--line)", marginTop:14, paddingTop:12 }}>
               <div className="card-title" style={{ fontSize:12.5 }}>Timeline</div>
               <Timeline entries={activeCase.timeline} />
@@ -310,15 +277,10 @@ export default function StudentSOS() {
               can coordinate and follow up, but for anything urgent, call or text
               the direct contacts above first.
             </p>
-            <label style={{ display:"flex", gap:8, alignItems:"center", fontSize:12.5, margin:"0 0 8px", cursor:"pointer" }}>
-              <input type="checkbox" checked={shareLocation} onChange={e => toggleShare(e.target.checked)} />
-              Share my location with OSAS and my barangay
-            </label>
             <div style={{ fontSize:11.5, marginBottom:12 }}>
-              {!shareLocation && <span style={{color:"#6b6457"}}>Your location will not be sent. You can still share it after the alert is sent.</span>}
-              {shareLocation && locationState === "locating" && <span style={{color:"#8a6414"}}>Getting your location...</span>}
-              {shareLocation && locationState === "ok" && <span style={{color:"#2f5d3f"}}>Location ready to share with OSAS and your barangay.</span>}
-              {shareLocation && locationState === "denied" && <span style={{color:"#7a3a23"}}>Location unavailable - the alert will still be sent without it.</span>}
+              {locationState === "locating" && <span style={{color:"#8a6414"}}>Getting your location...</span>}
+              {locationState === "ok" && <span style={{color:"#2f5d3f"}}>Location ready to share with OSAS.</span>}
+              {locationState === "denied" && <span style={{color:"#7a3a23"}}>Location unavailable - the alert will still be sent without it.</span>}
             </div>
             <div className="field">
               <label>Anything OSAS should know? (optional)</label>

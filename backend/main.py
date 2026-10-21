@@ -42,6 +42,27 @@ from models import (
 
 Base.metadata.create_all(bind=engine)
 
+
+def _ensure_columns():
+    """create_all() never alters existing tables, so add the verification
+    columns on startup if they are missing (safe to run every boot)."""
+    from sqlalchemy import inspect, text
+    try:
+        insp = inspect(engine)
+        cols = {c["name"] for c in insp.get_columns("boarding_houses")}
+        stmts = []
+        if "rejected_at" not in cols:
+            stmts.append("ALTER TABLE boarding_houses ADD COLUMN rejected_at TIMESTAMP")
+        if "verification_remarks" not in cols:
+            stmts.append("ALTER TABLE boarding_houses ADD COLUMN verification_remarks TEXT")
+        if stmts:
+            with engine.begin() as conn:
+                for st in stmts: conn.execute(text(st))
+    except Exception as e:  # never block startup
+        print("ensure_columns skipped:", e)
+
+_ensure_columns()
+
 app = FastAPI(title="GeoTrack API", version="3.0.0")
 
 _origins_env = os.getenv("ALLOWED_ORIGINS", "")
@@ -101,16 +122,51 @@ async def _unhandled_exception_handler(request, exc):
     traceback.print_exc()
     return JSONResponse(status_code=500, content={"detail": f"Internal server error: {exc}"})
 
+def auto_reject_overdue_houses(db: Session) -> int:
+    """Outside-coverage submissions not verified by OSAS within the 7-day
+    window are automatically set to Rejected (with remarks)."""
+    now = datetime.utcnow()
+    n = 0
+    rows = (db.query(models.BoardingHouse)
+              .filter(models.BoardingHouse.is_verified == False,
+                      models.BoardingHouse.rejected_at.is_(None)).all())
+    for h in rows:
+        due = h.verification_due
+        if due is None or due > now:
+            continue
+        h.is_verified = False
+        h.has_barangay_permit = False
+        h.rejected_at = now
+        h.verification_remarks = ("Auto-rejected: not verified by OSAS within 7 days of submission. "
+                                  "You may re-submit with complete details.")
+        n += 1
+        if h.submitted_by_id:
+            db.add(models.Notification(user_id=h.submitted_by_id, category="rejection",
+                   title="Boarding house rejected",
+                   message=f"{h.name} was automatically rejected because it was not verified within 7 days."))
+    if n:
+        db.commit()
+    return n
+
 def _scheduled_compliance_sweep():
     """Runs on its own DB session since it's not triggered by a request."""
     db = SessionLocal()
     try:
         run_compliance_automation(db, actor=None)
+        auto_reject_overdue_houses(db)
     finally:
         db.close()
 
 scheduler = BackgroundScheduler(timezone="UTC")
 scheduler.add_job(_scheduled_compliance_sweep, "cron", hour=0, minute=10, id="compliance_daily_sweep")
+
+def _scheduled_auto_reject():
+    db = SessionLocal()
+    try:
+        auto_reject_overdue_houses(db)
+    finally:
+        db.close()
+scheduler.add_job(_scheduled_auto_reject, "interval", hours=1, id="auto_reject_overdue")
 
 @app.on_event("startup")
 def _start_scheduler():
@@ -279,6 +335,11 @@ def register_student(payload: schemas.RegisterStudentRequest, db: Session = Depe
                 contact_number=payload.landlord_contact)
             db.add(house); db.commit(); db.refresh(house)
         else:
+            # Re-submission of a house this same student had rejected: reopen it
+            # as Unverified with a fresh 7-day window.
+            if house.rejected_at is not None and house.submitted_by_id == user.id:
+                house.rejected_at = None; house.is_verified = False
+                house.verification_remarks = None; house.created_at = datetime.utcnow()
             # Auto-fill landlord info this student provided if the existing
             # record is missing it - OSAS shouldn't have to chase down
             # contact details separately when a student already has them.
@@ -637,7 +698,14 @@ def update_profile(payload: schemas.MyProfileUpdate, db: Session = Depends(get_d
 
 @app.get("/api/student/boarding-houses", response_model=List[schemas.BoardingHouseOut])
 def student_list_bh(db: Session = Depends(get_db), user: models.User = Depends(require_student)):
-    return db.query(models.BoardingHouse).all()
+    # Rejected houses are only visible to the student who submitted them
+    # (so they can read the remarks); everyone else just sees the rest.
+    from sqlalchemy import or_
+    auto_reject_overdue_houses(db)
+    return (db.query(models.BoardingHouse)
+              .filter(or_(models.BoardingHouse.rejected_at.is_(None),
+                          models.BoardingHouse.submitted_by_id == user.id))
+              .all())
 
 @app.get("/api/student/boarding-houses/{hid}/reviews", response_model=List[schemas.ReviewOut])
 def student_get_reviews(hid: int, db: Session = Depends(get_db), user: models.User = Depends(require_student)):
@@ -1001,7 +1069,7 @@ def dashboard(db: Session = Depends(get_db), user: models.User = Depends(require
         total_students=len(students),
         updates_submitted=len(updates),
         flagged_students=db.query(models.StatusUpdate).filter(models.StatusUpdate.is_flagged==True).count(),
-        pending_verifications=db.query(models.BoardingHouse).filter(models.BoardingHouse.is_verified==False).count(),
+        pending_verifications=db.query(models.BoardingHouse).filter(models.BoardingHouse.is_verified==False, models.BoardingHouse.rejected_at.is_(None)).count(),
         active_emergencies=db.query(models.EmergencyCase).filter(models.EmergencyCase.status.in_(["Active","Responding"])).count(),
         by_gender=[{"label":k,"count":v} for k,v in sorted(gender_counts.items())],
         by_department=[{"label":k,"count":v} for k,v in sorted(dept_counts.items())],
@@ -1148,33 +1216,67 @@ def flag_update(
 
 @app.get("/api/osas/boarding-houses", response_model=List[schemas.BoardingHouseOut])
 def list_bh(db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
+    auto_reject_overdue_houses(db)
     return db.query(models.BoardingHouse).all()
 
 @app.patch("/api/osas/boarding-houses/{hid}/verify", response_model=schemas.BoardingHouseOut)
-def verify_bh(hid: int, db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
+def verify_bh(hid: int, payload: Optional[schemas.BoardingHouseVerify] = None,
+              db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
     h = db.query(models.BoardingHouse).get(hid)
     if not h: raise HTTPException(404, "Not found")
-    if h.barangay not in PARTICIPATING_BARANGAYS:
-        raise HTTPException(400, f"{h.barangay} does not yet participate in barangay permit verification, so this boarding house cannot be marked verified. Coordinate with that barangay first.")
-    h.is_verified = True; db.commit(); db.refresh(h)
-    log_action(db, user, "verify", "boarding_house", hid, h.name, "Boarding house verified")
+    direct = h.outside_coverage
+    h.is_verified = True
+    h.rejected_at = None
+    h.verification_remarks = ("Verified directly by OSAS (outside the barangay permit portal's coverage)."
+                              if direct else None)
+    db.commit(); db.refresh(h)
+    log_action(db, user, "verify", "boarding_house", hid, h.name,
+               "Verified directly by OSAS (outside covered barangay)" if direct else "Boarding house verified")
     if h.submitter:
         email_utils.notify_boarding_house_approved(h.submitter.email, h.submitter.full_name, h.name)
-        notify(db, h.submitter.id, "approval", "Boarding house approved",
+        notify(db, h.submitter.id, "approval", "Boarding house verified",
                f"Your submission for \"{h.name}\" has been verified by OSAS.")
     return h
+
+def _require_reason(reason: Optional[str]) -> str:
+    r = (reason or "").strip()
+    if len(r) < 5:
+        raise HTTPException(400, "A reason (at least 5 characters) is required.")
+    return r
 
 @app.post("/api/osas/boarding-houses/{hid}/reject", response_model=schemas.BoardingHouseOut)
 def reject_bh(hid: int, payload: schemas.BoardingHouseReject, db: Session = Depends(get_db),
              user: models.User = Depends(require_osas_admin)):
     h = db.query(models.BoardingHouse).get(hid)
     if not h: raise HTTPException(404, "Not found")
-    h.is_verified = False; db.commit(); db.refresh(h)
-    log_action(db, user, "reject", "boarding_house", hid, h.name, payload.reason or "Boarding house rejected")
+    reason = _require_reason(payload.reason)
+    h.is_verified = False
+    h.has_barangay_permit = False
+    h.rejected_at = datetime.utcnow()
+    h.verification_remarks = reason
+    db.commit(); db.refresh(h)
+    log_action(db, user, "reject", "boarding_house", hid, h.name, f"Rejected: {reason}")
     if h.submitter:
-        email_utils.notify_boarding_house_rejected(h.submitter.email, h.submitter.full_name, h.name, payload.reason)
+        email_utils.notify_boarding_house_rejected(h.submitter.email, h.submitter.full_name, h.name, reason)
         notify(db, h.submitter.id, "rejection", "Boarding house rejected",
-               f"Your submission for \"{h.name}\" was rejected. Reason: {payload.reason or 'Not specified'}")
+               f"Your submission for \"{h.name}\" was rejected. Reason: {reason}")
+    return h
+
+@app.post("/api/osas/boarding-houses/{hid}/unverify", response_model=schemas.BoardingHouseOut)
+def unverify_bh(hid: int, payload: schemas.BoardingHouseReject, db: Session = Depends(get_db),
+                user: models.User = Depends(require_osas_admin)):
+    h = db.query(models.BoardingHouse).get(hid)
+    if not h: raise HTTPException(404, "Not found")
+    reason = _require_reason(payload.reason)
+    h.is_verified = False
+    h.has_barangay_permit = False
+    h.rejected_at = None
+    h.verification_remarks = reason
+    db.commit(); db.refresh(h)
+    log_action(db, user, "update", "boarding_house", hid, h.name, f"Verification removed: {reason}")
+    if h.submitter:
+        notify(db, h.submitter.id, "rejection", "Boarding house unverified",
+               f"\"{h.name}\" is no longer verified. Reason: {reason}")
     return h
 
 @app.put("/api/osas/boarding-houses/{hid}", response_model=schemas.BoardingHouseOut)
@@ -1230,6 +1332,11 @@ def barangay_confirm_permit(hid: int, payload: schemas.BarangayPermitUpdate,
     # "verified" status - OSAS's verify button (above) requires this to
     # already be true for a participating barangay.
     h.is_verified = bool(payload.has_barangay_permit)
+    if payload.has_barangay_permit:
+        h.rejected_at = None
+        h.verification_remarks = None
+    else:
+        h.verification_remarks = "The barangay could not confirm a valid business permit."
     db.commit(); db.refresh(h)
     log_action(db, user, "verify" if payload.has_barangay_permit else "reject", "boarding_house", hid, h.name,
                "Barangay confirmed business permit" if payload.has_barangay_permit else "Barangay could not confirm a valid permit")
@@ -1684,7 +1791,7 @@ def _fill_narrative_template(sections, month_label) -> str:
     )
 
 SECTION_LABELS_BACKEND = {
-    "barangay": "Barangay", "boarding_house": "Boarding house", "gender": "Gender",
+    "barangay": "Barangay", "boarding_house": "Boarding house", "gender": "Sex",
     "department": "Department", "section": "Section", "monthly_status": "Monthly status",
 }
 

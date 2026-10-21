@@ -6,6 +6,7 @@ import { useSessionTimeout } from "../../hooks/useSessionTimeout";
 import InstallAppButton from "../../components/InstallAppButton";
 import PortalFooter from "../../components/PortalFooter";
 import "./osas.css";
+import { dialog } from "../../components/dialogs";
 
 export default function OsasLayout() {
   const { fullName, logout } = useAuth();
@@ -14,8 +15,8 @@ export default function OsasLayout() {
   const [showTimeoutWarning, setShowTimeoutWarning] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  function handleLogout(ask = true) {
-    if (ask && !window.confirm("Are you sure you want to sign out?")) return;
+  async function handleLogout(ask = true) {
+    if (ask && !(await dialog.confirm({ title:"Sign out?", message:"You'll need to sign in again to continue.", confirmText:"Sign out" }))) return;
     logout(); navigate("/osas/login");
   }
 
