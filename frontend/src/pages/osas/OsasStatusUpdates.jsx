@@ -1,5 +1,5 @@
 // src/pages/osas/OsasStatusUpdates.jsx - with search + filter panel
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
 import MonthCalendar, { monthLabel } from "../../components/MonthCalendar";
 import { dialog } from "../../components/dialogs";
@@ -9,21 +9,36 @@ function MonthFilterDropdown({ month, onChange }) {
   const [open, setOpen] = useState(false);
   const [viewYear, setViewYear] = useState(now.getFullYear());
   const [viewMonth, setViewMonth] = useState(now.getMonth());
+  const [pos, setPos] = useState({ top:0, left:0 });
+  const btnRef = useRef(null);
+
+  // The popup is position:fixed (not absolute) so the card's overflow
+  // scrolling can't clip it, and it is clamped inside the screen.
+  function toggle() {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      const width = Math.min(340, window.innerWidth - 16);
+      const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+      const top = Math.min(r.bottom + 4, Math.max(8, window.innerHeight - 440));
+      setPos({ top, left, width });
+    }
+    setOpen(v => !v);
+  }
 
   return (
     <div style={{ position:"relative" }}>
-      <button type="button" className="btn" style={{ minWidth:170, textAlign:"left", display:"flex", justifyContent:"space-between", alignItems:"center" }}
-        onClick={() => setOpen(v => !v)}>
+      <button ref={btnRef} type="button" className="btn" style={{ minWidth:170, textAlign:"left", display:"flex", justifyContent:"space-between", alignItems:"center" }}
+        onClick={toggle}>
         <span>📅 {month || "All months"}</span>
         <span style={{ color:"#a39c8a" }}>{open ? "▴" : "▾"}</span>
       </button>
       {open && (
         <>
-          <div onClick={() => setOpen(false)} style={{ position:"fixed", inset:0, zIndex:19, background:"transparent" }} />
+          <div onClick={() => setOpen(false)} style={{ position:"fixed", inset:0, zIndex:1000, background:"transparent" }} />
           <div style={{
-            position:"absolute", top:"100%", left:0, marginTop:4, zIndex:20,
-            background:"#fff", border:"1px solid var(--line)", borderRadius:12,
-            boxShadow:"0 8px 24px rgba(28,43,36,.18)", padding:12,
+            position:"fixed", top:pos.top, left:pos.left, width:pos.width, maxHeight:"calc(100vh - 16px)", overflow:"auto",
+            zIndex:1001, background:"#fff", border:"1px solid var(--line)", borderRadius:12,
+            boxShadow:"0 8px 24px rgba(28,43,36,.18)", padding:12, boxSizing:"border-box",
           }}>
             <MonthCalendar year={viewYear} month={viewMonth} onSelect={(y,m) => {
               setViewYear(y); setViewMonth(m); onChange(monthLabel(y, m)); setOpen(false);
