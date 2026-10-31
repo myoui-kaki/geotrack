@@ -13,7 +13,7 @@ from io import BytesIO
 import pyotp
 from fastapi import FastAPI, Depends, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, extract
@@ -77,7 +77,63 @@ ALLOWED_ORIGINS = [o.strip() for o in _origins_env.split(",") if o.strip()] or [
     "http://localhost:5173",
 ]
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
-                   allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+                   allow_credentials=True,
+                   allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+                   allow_headers=["Authorization", "Content-Type"])
+
+
+# ─── Security hardening (ITEP 413 cybersecurity plan) ─────────────────────────
+import time, threading
+from collections import defaultdict, deque
+from fastapi import Request
+
+if os.getenv("SECRET_KEY") in (None, "", "geotrack-dev-secret-change-in-production"):
+    print("WARNING: SECRET_KEY is not set - set a long random value in Railway before going live.")
+
+# Per-IP sliding-window limits on the endpoints attackers hammer (credential
+# stuffing, OTP and 2FA guessing, password-reset spam). Account lockout still
+# applies on top of this; this stops one IP from trying many accounts.
+_RATE_RULES = {            # path -> (max requests, window seconds)
+    "/api/auth/token": (20, 300),
+    "/api/auth/2fa/verify": (15, 300),
+    "/api/auth/verify-otp": (15, 300),
+    "/api/auth/resend-otp": (5, 300),
+    "/api/auth/forgot-password": (5, 600),
+    "/api/auth/reset-password": (10, 600),
+}
+_rate_hits = defaultdict(deque)
+_rate_lock = threading.Lock()
+
+def _client_ip(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for")
+    return (fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "unknown"))
+
+@app.middleware("http")
+async def security_middleware(request: Request, call_next):
+    rule = _RATE_RULES.get(request.url.path) if request.method == "POST" else None
+    if rule:
+        limit, window = rule
+        key = (request.url.path, _client_ip(request))
+        now = time.monotonic()
+        with _rate_lock:
+            q = _rate_hits[key]
+            while q and now - q[0] > window:
+                q.popleft()
+            blocked = len(q) >= limit
+            if not blocked:
+                q.append(now)
+        if blocked:
+            return JSONResponse(status_code=429, headers={"Retry-After": str(window)},
+                                content={"detail": "Too many requests from your network. Please wait a few minutes and try again."})
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "geolocation=(self), camera=(), microphone=()")
+    response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+    response.headers.setdefault("Cache-Control", "no-store")
+    return response
 
 # ─── Google Sign-In ────────────────────────────────────────────────────────────
 # Set in Railway (and locally in .env) from the OAuth Client ID you create in
@@ -119,8 +175,20 @@ import traceback
 
 @app.exception_handler(Exception)
 async def _unhandled_exception_handler(request, exc):
-    traceback.print_exc()
-    return JSONResponse(status_code=500, content={"detail": f"Internal server error: {exc}"})
+    traceback.print_exc()   # full detail stays in the server log only
+    return JSONResponse(status_code=500, content={"detail": "Something went wrong on our side. Please try again."})
+
+_ALLOWED_PHOTO = re.compile(r"^data:image/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=\s]+$")
+MAX_PHOTO_BYTES = 4 * 1024 * 1024
+
+def _check_photo(data_url):
+    """Reject anything that is not a reasonably sized PNG/JPEG/WebP data URL."""
+    if not data_url:
+        return
+    if len(data_url) > MAX_PHOTO_BYTES * 4 // 3 + 100:
+        raise HTTPException(413, "Photo is too large (max 4 MB).")
+    if not _ALLOWED_PHOTO.match(data_url):
+        raise HTTPException(400, "Photo must be a PNG, JPEG or WebP image.")
 
 def auto_reject_overdue_houses(db: Session) -> int:
     """Outside-coverage submissions not verified by OSAS within the 7-day
@@ -768,6 +836,7 @@ def submit_status(
     # boarding house to document anymore. Submission itself is blocked
     # once-per-month further below, so this only ever fires once per month
     # per student in practice.
+    _check_photo(payload.photo_data_url)
     if payload.status_type in ("same", "transferred"):
         if not payload.photo_data_url:
             raise HTTPException(
@@ -883,6 +952,7 @@ def delete_status(uid: int, db: Session = Depends(get_db), user: models.User = D
 @app.post("/api/student/concerns", response_model=schemas.ConcernOut)
 def report_concern(payload: schemas.ConcernCreate, db: Session = Depends(get_db),
                    user: models.User = Depends(require_student)):
+    _check_photo(payload.photo_data_url)
     amenities_str = ",".join(payload.amenities_checklist) if payload.amenities_checklist else None
     c = models.Concern(
         student_id=user.id, category=payload.category, details=payload.details,
