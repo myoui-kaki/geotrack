@@ -117,7 +117,7 @@ export default function OsasStatusUpdates() {
           <div className="field" style={{marginBottom:0}}>
             <label>Sex</label>
             <select value={gender} onChange={e => setGender(e.target.value)}>
-              <option value="">All sexes</option>
+              <option value="">All sex</option>
               <option value="male">Male</option>
               <option value="female">Female</option>
             </select>

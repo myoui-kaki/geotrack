@@ -267,11 +267,6 @@ async function downloadCharts() {
           <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:10}}>
             <div className="panel-title" style={{marginBottom:8}}>
               Narrative report
-              {narrative.generated_by === "summary" && (
-                <span style={{fontSize:11,color:"#a39c8a",fontWeight:400,marginLeft:8}}>
-                  (templated summary - AI generation not configured)
-                </span>
-              )}
             </div>
             <div style={{display:"flex", gap:8}}>
               <button className="btn" style={{fontSize:11,padding:"5px 10px",whiteSpace:"nowrap"}}
