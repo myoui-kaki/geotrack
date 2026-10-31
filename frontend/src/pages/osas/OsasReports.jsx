@@ -255,9 +255,7 @@ async function downloadCharts() {
             disabled={!selected.length || narrativeLoading}
             onClick={async () => {
               const data = await handleGenerateNarrative(null);
-              if (data) {
-                setChatMessages([{ role:"assistant", text:"Here's your draft narrative report. Tell me anything you'd like me to add, remove, or change and I'll revise it." }]);
-              }
+              // narrative is shown in the card below
             }}>
             {narrativeLoading ? "Generating..." : "Generate narrative report"}
           </button>
@@ -268,7 +266,7 @@ async function downloadCharts() {
         <div className="card no-print" style={{marginBottom:18, borderLeft:"4px solid #2f5d4f"}}>
           <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:10}}>
             <div className="panel-title" style={{marginBottom:8}}>
-              AI report assistant
+              Narrative report
               {narrative.generated_by === "summary" && (
                 <span style={{fontSize:11,color:"#a39c8a",fontWeight:400,marginLeft:8}}>
                   (templated summary - AI generation not configured)
@@ -276,10 +274,6 @@ async function downloadCharts() {
               )}
             </div>
             <div style={{display:"flex", gap:8}}>
-              <button className="btn" style={{fontSize:11,padding:"5px 10px",whiteSpace:"nowrap"}}
-                onClick={() => setChatOpen(true)}>
-                Revise with assistant
-              </button>
               <button className="btn" style={{fontSize:11,padding:"5px 10px",whiteSpace:"nowrap"}}
                 onClick={async () => {
                   try {
@@ -315,51 +309,6 @@ async function downloadCharts() {
               </div>
             </div>
           )}
-        </div>
-      )}
-
-      {chatOpen && (
-        <div style={{
-          position:"fixed", top:0, right:0, bottom:0, width:340, maxWidth:"92vw",
-          background:"#fff", borderLeft:"1px solid var(--line)", boxShadow:"-6px 0 24px rgba(28,43,36,.15)",
-          zIndex:50, display:"flex", flexDirection:"column",
-        }} className="no-print">
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 16px",borderBottom:"1px solid var(--line)"}}>
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <span style={{
-                width:28,height:28,borderRadius:"50%",background:"#2f5d4f",color:"#fff",
-                display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,
-              }}>AI</span>
-              <div style={{fontSize:13,fontWeight:700,color:"#3a352b"}}>Report assistant</div>
-            </div>
-            <button onClick={() => setChatOpen(false)} style={{background:"none",border:"none",cursor:"pointer",fontSize:16,color:"#857d6c"}}>x</button>
-          </div>
-
-          <div style={{flex:1,overflowY:"auto",padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
-            {chatMessages.map((m,i) => (
-              <div key={i} style={{
-                alignSelf: m.role==="user" ? "flex-end" : "flex-start",
-                background: m.role==="user" ? "#2f5d4f" : "#faf9f5",
-                color: m.role==="user" ? "#fff" : "#3a352b",
-                border: m.role==="user" ? "none" : "1px solid var(--line)",
-                borderRadius:12, padding:"8px 12px", fontSize:12.5, maxWidth:"85%", lineHeight:1.5,
-              }}>
-                {m.text}
-              </div>
-            ))}
-            {chatSending && <div style={{fontSize:11.5,color:"#a39c8a"}}>Revising the report...</div>}
-          </div>
-
-          <div style={{padding:12,borderTop:"1px solid var(--line)",display:"flex",gap:8}}>
-            <input value={chatInput} onChange={e=>setChatInput(e.target.value)}
-              onKeyDown={e => { if (e.key==="Enter" && !chatSending) handleChatSend(); }}
-              placeholder="e.g. add a paragraph about the barangay coordination..."
-              style={{flex:1,fontSize:12.5,border:"1px solid var(--line)",borderRadius:20,padding:"8px 14px"}} />
-            <button className="btn primary" style={{borderRadius:20,padding:"8px 14px"}}
-              disabled={chatSending || !chatInput.trim()} onClick={handleChatSend}>
-              Send
-            </button>
-          </div>
         </div>
       )}
 
