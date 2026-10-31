@@ -1,46 +1,24 @@
 // src/pages/osas/OsasStatusUpdates.jsx - with search + filter panel
 import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
 import { api } from "../../api/client";
-import MonthCalendar, { monthLabel } from "../../components/MonthCalendar";
 import { dialog } from "../../components/dialogs";
 
+const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+// Plain dropdown: "All months", then the current month going back 24 months.
 function MonthFilterDropdown({ month, onChange }) {
   const now = new Date();
-  const [open, setOpen] = useState(false);
-  const [viewYear, setViewYear] = useState(now.getFullYear());
-  const [viewMonth, setViewMonth] = useState(now.getMonth());
-  const toggle = () => setOpen(v => !v);
-
+  const options = [];
+  for (let i = 0; i < 24; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    options.push(`${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`);
+  }
+  if (month && !options.includes(month)) options.push(month);
   return (
-    <div style={{ position:"relative" }}>
-      <button type="button" className="btn" style={{ minWidth:170, textAlign:"left", display:"flex", justifyContent:"space-between", alignItems:"center" }}
-        onClick={toggle}>
-        <span>📅 {month || "All months"}</span>
-        <span style={{ color:"#a39c8a" }}>{open ? "▴" : "▾"}</span>
-      </button>
-      {open && createPortal(
-        <div onClick={() => setOpen(false)} style={{
-          position:"fixed", inset:0, zIndex:1000, background:"rgba(28,43,36,.35)",
-          display:"flex", alignItems:"center", justifyContent:"center", padding:16, boxSizing:"border-box",
-        }}>
-          <div onClick={e => e.stopPropagation()} style={{
-            background:"#fff", border:"1px solid var(--line)", borderRadius:14,
-            boxShadow:"0 12px 40px rgba(28,43,36,.3)", padding:12, boxSizing:"border-box",
-            width:"100%", maxWidth:340, maxHeight:"calc(100vh - 32px)", overflow:"auto",
-          }}>
-            <MonthCalendar year={viewYear} month={viewMonth} onSelect={(y,m) => {
-              setViewYear(y); setViewMonth(m); onChange(monthLabel(y, m)); setOpen(false);
-            }} />
-            <button type="button" className="btn" style={{ width:"100%", marginTop:8, fontSize:12 }}
-              onClick={() => { onChange(""); setOpen(false); }}>
-              Clear (show all months)
-            </button>
-          </div>
-        </div>,
-        document.body
-      )}
-    </div>
+    <select value={month} onChange={e => onChange(e.target.value)}>
+      <option value="">All months</option>
+      {options.map(m => <option key={m} value={m}>{m}</option>)}
+    </select>
   );
 }
 
