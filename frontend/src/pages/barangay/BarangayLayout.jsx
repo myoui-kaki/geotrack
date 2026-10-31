@@ -57,6 +57,7 @@ export default function BarangayLayout() {
       <main className="osas-main" style={{display:"flex",flexDirection:"column"}}>
         <div className="mobile-topbar">
           <div className="brand-mark"><span className="pin-dot"></span> GEOTRACK</div>
+          <InstallAppButton variant="compact" />
           <button className="brgy-logout-icon" onClick={() => navigate("/barangay/profile")} aria-label="Profile">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
               strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

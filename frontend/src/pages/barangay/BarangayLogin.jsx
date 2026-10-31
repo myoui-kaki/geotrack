@@ -12,6 +12,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import { useAuth } from "../../context/AuthContext";
 import GoogleSignInButton from "../../components/GoogleSignInButton";
+import InstallAppButton from "../../components/InstallAppButton";
 import "../osas/osas.css";
 
 export default function BarangayLogin() {
@@ -105,6 +106,8 @@ export default function BarangayLogin() {
               cursor:"pointer", fontFamily:"inherit", textDecoration:"underline",
             }}>Forgot password?</button>
           </div>
+
+          <div style={{ marginTop: 14 }}><InstallAppButton variant="block" /></div>
 
           <div className="scope-note">
             This portal is for barangay officials only.

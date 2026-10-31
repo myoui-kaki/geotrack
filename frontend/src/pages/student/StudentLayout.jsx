@@ -51,6 +51,7 @@ export default function StudentLayout() {
               </svg>
             </button>
             <div className="brand-mark"><span className="pin-dot"></span> GEOTRACK</div>
+            <InstallAppButton variant="compact" />
           </div>
 
           <div className="page-fade" key={location.pathname}><Outlet /></div>

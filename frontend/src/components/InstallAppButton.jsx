@@ -18,6 +18,23 @@
 
 import { useEffect, useState } from "react";
 
+// The browser fires `beforeinstallprompt` once, early. Capture it at import
+// time so a button that mounts later (e.g. inside a closed menu or on a
+// different page) can still use it.
+let savedPrompt = null;
+const listeners = new Set();
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    savedPrompt = e;
+    listeners.forEach(fn => fn(e));
+  });
+  window.addEventListener("appinstalled", () => {
+    savedPrompt = null;
+    listeners.forEach(fn => fn(null));
+  });
+}
+
 function isIos() {
   return /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
 }
@@ -28,25 +45,15 @@ function isStandalone() {
 }
 
 export default function InstallAppButton({ variant = "default" }) {
-  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [deferredPrompt, setDeferredPrompt] = useState(savedPrompt);
   const [installed, setInstalled] = useState(isStandalone());
   const [showIosSteps, setShowIosSteps] = useState(false);
 
   useEffect(() => {
-    function onBeforeInstallPrompt(e) {
-      e.preventDefault();
-      setDeferredPrompt(e);
-    }
-    function onInstalled() {
-      setInstalled(true);
-      setDeferredPrompt(null);
-    }
-    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-    window.addEventListener("appinstalled", onInstalled);
-    return () => {
-      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-      window.removeEventListener("appinstalled", onInstalled);
-    };
+    const fn = (e) => { setDeferredPrompt(e); if (!e) setInstalled(true); };
+    listeners.add(fn);
+    setDeferredPrompt(savedPrompt);
+    return () => listeners.delete(fn);
   }, []);
 
   if (installed) return null;
@@ -58,18 +65,12 @@ export default function InstallAppButton({ variant = "default" }) {
       setDeferredPrompt(null);
       return;
     }
-    if (isIos()) {
-      setShowIosSteps(true);
-      return;
-    }
-    // Neither path available (e.g. already dismissed once this session,
-    // or a browser with no install support at all) - nothing to do.
+    // iOS has no install API, and some Android/desktop browsers have not
+    // offered the prompt (yet): show step-by-step instructions instead.
+    setShowIosSteps(true);
   }
 
-  // On iOS there's no browser event to wait for, so show the button as
-  // soon as we know we're on iOS and not yet installed.
-  const canShow = !!deferredPrompt || isIos();
-  if (!canShow) return null;
+  const ios = isIos();
 
   // The default ".btn" style (light background, dark text) reads fine on a
   // light page, but looks like a stray white blob sitting in a dark sidebar
@@ -94,6 +95,8 @@ export default function InstallAppButton({ variant = "default" }) {
         className={variant === "sidebar" ? "" : "btn"}
         style={variant === "sidebar"
           ? sidebarStyle
+          : variant === "compact"
+            ? { fontSize:12, padding:"6px 10px", fontWeight:700, marginLeft:"auto", whiteSpace:"nowrap" }
           : variant === "block"
             ? { width:"100%", padding:12, fontSize:13.5, fontWeight:700 }
             : { fontSize:12.5, padding:"8px 14px", fontWeight:700 }}
@@ -110,14 +113,26 @@ export default function InstallAppButton({ variant = "default" }) {
           <div onClick={(e) => e.stopPropagation()} style={{
             background:"#fff", borderRadius:"16px 16px 0 0", padding:20, maxWidth:420, width:"100%",
           }}>
-            <div style={{ fontWeight:700, fontSize:14, marginBottom:10 }}>Install on iPhone/iPad</div>
-            <ol style={{ fontSize:13, color:"#544f43", paddingLeft:18, lineHeight:1.7 }}>
-              <li>Tap the <strong>Share</strong> button in Safari (the square with an arrow, at the bottom of the screen).</li>
-              <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
-              <li>Tap <strong>Add</strong> at the top right.</li>
-            </ol>
+            <div style={{ fontWeight:700, fontSize:14, marginBottom:10 }}>
+              {ios ? "Add GeoTrack to your Home Screen (iPhone/iPad)" : "Add GeoTrack to your Home Screen"}
+            </div>
+            {ios ? (
+              <ol style={{ fontSize:13, color:"#544f43", paddingLeft:18, lineHeight:1.7 }}>
+                <li>Open this page in <strong>Safari</strong>.</li>
+                <li>Tap the <strong>Share</strong> button (square with an arrow).</li>
+                <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
+                <li>Tap <strong>Add</strong> at the top right.</li>
+              </ol>
+            ) : (
+              <ol style={{ fontSize:13, color:"#544f43", paddingLeft:18, lineHeight:1.7 }}>
+                <li>Open this page in <strong>Chrome</strong> (Android) or Edge/Chrome (computer).</li>
+                <li>Tap the <strong>menu (&#8942;)</strong> at the top right.</li>
+                <li>Tap <strong>Install app</strong> or <strong>Add to Home screen</strong>.</li>
+                <li>Tap <strong>Install</strong>. GeoTrack will appear on your home screen.</li>
+              </ol>
+            )}
             <p style={{ fontSize:11.5, color:"#a39c8a", marginTop:8 }}>
-              Note: iOS only allows this through Safari's own Share menu - no app or website can trigger it automatically.
+              Browsers only let you install from their own menu if the one-tap prompt is not available.
             </p>
             <button className="btn primary" style={{ width:"100%", marginTop:10 }} onClick={() => setShowIosSteps(false)}>
               Got it

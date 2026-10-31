@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import { useAuth } from "../../context/AuthContext";
 import GoogleSignInButton from "../../components/GoogleSignInButton";
+import InstallAppButton from "../../components/InstallAppButton";
 import { STUDENT_TERMS as TERMS } from "../../components/termsText";
 import "./student.css";
 
@@ -315,6 +316,8 @@ export default function StudentLogin() {
         {mode === "login" && (
           <GoogleSignInButton role="student" onSuccess={handleGoogleSuccess} onError={setError} />
         )}
+
+        <div style={{ marginTop: 14 }}><InstallAppButton variant="block" /></div>
 
         <div className="student-login-toggle">
           {mode === "login"
