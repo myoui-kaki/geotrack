@@ -1,5 +1,6 @@
 // src/pages/osas/OsasStatusUpdates.jsx - with search + filter panel
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { api } from "../../api/client";
 import MonthCalendar, { monthLabel } from "../../components/MonthCalendar";
 import { dialog } from "../../components/dialogs";
@@ -9,36 +10,24 @@ function MonthFilterDropdown({ month, onChange }) {
   const [open, setOpen] = useState(false);
   const [viewYear, setViewYear] = useState(now.getFullYear());
   const [viewMonth, setViewMonth] = useState(now.getMonth());
-  const [pos, setPos] = useState({ top:0, left:0 });
-  const btnRef = useRef(null);
-
-  // The popup is position:fixed (not absolute) so the card's overflow
-  // scrolling can't clip it, and it is clamped inside the screen.
-  function toggle() {
-    if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      const width = Math.min(340, window.innerWidth - 16);
-      const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
-      const top = Math.min(r.bottom + 4, Math.max(8, window.innerHeight - 440));
-      setPos({ top, left, width });
-    }
-    setOpen(v => !v);
-  }
+  const toggle = () => setOpen(v => !v);
 
   return (
     <div style={{ position:"relative" }}>
-      <button ref={btnRef} type="button" className="btn" style={{ minWidth:170, textAlign:"left", display:"flex", justifyContent:"space-between", alignItems:"center" }}
+      <button type="button" className="btn" style={{ minWidth:170, textAlign:"left", display:"flex", justifyContent:"space-between", alignItems:"center" }}
         onClick={toggle}>
         <span>📅 {month || "All months"}</span>
         <span style={{ color:"#a39c8a" }}>{open ? "▴" : "▾"}</span>
       </button>
-      {open && (
-        <>
-          <div onClick={() => setOpen(false)} style={{ position:"fixed", inset:0, zIndex:1000, background:"transparent" }} />
-          <div style={{
-            position:"fixed", top:pos.top, left:pos.left, width:pos.width, maxHeight:"calc(100vh - 16px)", overflow:"auto",
-            zIndex:1001, background:"#fff", border:"1px solid var(--line)", borderRadius:12,
-            boxShadow:"0 8px 24px rgba(28,43,36,.18)", padding:12, boxSizing:"border-box",
+      {open && createPortal(
+        <div onClick={() => setOpen(false)} style={{
+          position:"fixed", inset:0, zIndex:1000, background:"rgba(28,43,36,.35)",
+          display:"flex", alignItems:"center", justifyContent:"center", padding:16, boxSizing:"border-box",
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background:"#fff", border:"1px solid var(--line)", borderRadius:14,
+            boxShadow:"0 12px 40px rgba(28,43,36,.3)", padding:12, boxSizing:"border-box",
+            width:"100%", maxWidth:340, maxHeight:"calc(100vh - 32px)", overflow:"auto",
           }}>
             <MonthCalendar year={viewYear} month={viewMonth} onSelect={(y,m) => {
               setViewYear(y); setViewMonth(m); onChange(monthLabel(y, m)); setOpen(false);
@@ -48,7 +37,8 @@ function MonthFilterDropdown({ month, onChange }) {
               Clear (show all months)
             </button>
           </div>
-        </>
+        </div>,
+        document.body
       )}
     </div>
   );
