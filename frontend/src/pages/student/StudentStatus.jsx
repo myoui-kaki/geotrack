@@ -107,6 +107,9 @@ function EditUpdateForm({ update, onCancel, onSaved, onError }) {
   const [statusType, setStatusType] = useState(update.status_type);
   const [newBoardingHouseName, setNewBoardingHouseName] = useState(update.new_boarding_house_name || "");
   const [newBarangay, setNewBarangay] = useState(update.new_barangay || "");
+  const [landlord, setLandlord] = useState("");
+  const [landlordEmail, setLandlordEmail] = useState("");
+  const [landlordContact, setLandlordContact] = useState("");
   const [note, setNote] = useState(update.note || "");
   const [amenities, setAmenities] = useState(update.amenities_checklist ? update.amenities_checklist.split(",") : []);
   const [photoDataUrl, setPhotoDataUrl] = useState(update.photo_data_url || null);
@@ -131,6 +134,11 @@ function EditUpdateForm({ update, onCancel, onSaved, onError }) {
   }
 
   async function handleSave() {
+    if (statusType === "transferred" &&
+        ![newBoardingHouseName, newBarangay, landlord, landlordEmail, landlordContact].every(v => (v || "").trim())) {
+      onError("Please fill in the boarding house name, barangay, landlord name, landlord email and contact number.");
+      return;
+    }
     if (showDocumentation && !photoDataUrl) {
       onError("A photo of your boarding house is required before saving this update.");
       return;
@@ -144,8 +152,11 @@ function EditUpdateForm({ update, onCancel, onSaved, onError }) {
     try {
       await api.student.updateStatusUpdate(update.id, {
         status_type: statusType,
-        new_boarding_house_name: statusType === "transferred" ? newBoardingHouseName : null,
-        new_barangay: statusType === "transferred" ? newBarangay : null,
+        new_boarding_house_name: statusType === "transferred" ? newBoardingHouseName.trim() : null,
+        new_barangay: statusType === "transferred" ? newBarangay.trim() : null,
+        landlord_name: statusType === "transferred" ? landlord.trim() : null,
+        landlord_email: statusType === "transferred" ? landlordEmail.trim() : null,
+        landlord_contact: statusType === "transferred" ? landlordContact.trim() : null,
         note: note || null,
         photo_data_url: showDocumentation ? photoDataUrl : null,
         amenities_checklist: showDocumentation ? amenities : null,
@@ -171,12 +182,24 @@ function EditUpdateForm({ update, onCancel, onSaved, onError }) {
       {statusType === "transferred" && (
         <>
           <div className="field">
-            <label>New boarding house name</label>
+            <label>Boarding house name *</label>
             <input value={newBoardingHouseName} onChange={(e) => setNewBoardingHouseName(e.target.value)} required />
           </div>
           <div className="field">
-            <label>Barangay / address</label>
+            <label>Barangay *</label>
             <input value={newBarangay} onChange={(e) => setNewBarangay(e.target.value)} required />
+          </div>
+          <div className="field">
+            <label>Landlord name *</label>
+            <input value={landlord} onChange={(e) => setLandlord(e.target.value)} required />
+          </div>
+          <div className="field">
+            <label>Landlord email *</label>
+            <input type="email" value={landlordEmail} onChange={(e) => setLandlordEmail(e.target.value)} required />
+          </div>
+          <div className="field">
+            <label>Landlord contact number *</label>
+            <input type="tel" value={landlordContact} onChange={(e) => setLandlordContact(e.target.value)} required />
           </div>
         </>
       )}

@@ -248,6 +248,9 @@ class StatusUpdateEdit(BaseModel):
     status_type: Optional[Literal["same", "transferred", "moved_home"]] = None
     new_boarding_house_name: Optional[str] = None
     new_barangay: Optional[str] = None
+    landlord_name: Optional[str] = None
+    landlord_email: Optional[str] = None
+    landlord_contact: Optional[str] = None
     note: Optional[str] = None
     photo_data_url: Optional[str] = None
     amenities_checklist: Optional[List[str]] = None

@@ -981,6 +981,22 @@ def edit_status(uid: int, payload: schemas.StatusUpdateEdit, db: Session = Depen
     if u.month_label != datetime.utcnow().strftime("%B %Y"):
         raise HTTPException(403, "Past months can no longer be edited.")
     data = payload.dict(exclude_unset=True)
+    ll_name = (data.pop("landlord_name", None) or "").strip()
+    ll_email = (data.pop("landlord_email", None) or "").strip()
+    ll_contact = (data.pop("landlord_contact", None) or "").strip()
+    if data.get("status_type") == "transferred":
+        nm = (data.get("new_boarding_house_name") or "").strip()
+        br = (data.get("new_barangay") or "").strip()
+        missing = [l for l, v in (("Boarding house name", nm), ("Barangay", br), ("Landlord name", ll_name),
+                                  ("Landlord email", ll_email), ("Landlord contact number", ll_contact)) if not v]
+        if missing:
+            raise HTTPException(400, "Please fill in: " + ", ".join(missing) + ".")
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", ll_email):
+            raise HTTPException(400, "Please enter a valid landlord email address.")
+        house = _upsert_student_house(db, user, "transferred", nm, br, ll_name, ll_email, ll_contact)
+        u.boarding_house_id = house.id
+        data["new_boarding_house_name"] = house.name
+        data["new_barangay"] = house.barangay
     if "amenities_checklist" in data:
         checklist = data.pop("amenities_checklist")
         u.amenities_checklist = ",".join(checklist) if checklist else None
