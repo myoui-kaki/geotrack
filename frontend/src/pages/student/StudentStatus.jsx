@@ -411,26 +411,24 @@ export default function StudentStatus() {
                 fields wired into the request body. */}
             {showHouseFields && (
               <>
-                <div className="field">
-                  <label>Boarding house name *</label>
-                  <input value={house.name} onChange={setH("name")} placeholder="e.g. Green Haven Dorm" required />
-                </div>
-                <div className="field">
-                  <label>Barangay *</label>
-                  <input value={house.barangay} onChange={setH("barangay")} placeholder="e.g. Brgy. Del Remedio" required />
-                </div>
-                <div className="field">
-                  <label>Landlord name *</label>
-                  <input value={house.landlord} onChange={setH("landlord")} required />
-                </div>
-                <div className="field">
-                  <label>Landlord email *</label>
-                  <input type="email" value={house.email} onChange={setH("email")} required />
-                </div>
-                <div className="field">
-                  <label>Landlord contact number *</label>
-                  <input type="tel" value={house.contact} onChange={setH("contact")} required />
-                </div>
+                {[
+                  ["name", "Boarding house name *", "text", "e.g. Green Haven Dorm"],
+                  ["barangay", "Barangay *", "text", "e.g. Brgy. Del Remedio"],
+                  ["landlord", "Landlord name *", "text", ""],
+                  ["email", "Landlord email *", "email", ""],
+                  ["contact", "Landlord contact number *", "tel", ""],
+                ].filter(([k]) => statusType === "transferred" || !current || !(current[k] || "").trim())
+                 .map(([k, label, type, ph]) => (
+                  <div className="field" key={k}>
+                    <label>{label}</label>
+                    <input type={type} value={house[k]} onChange={setH(k)} placeholder={ph} required />
+                  </div>
+                ))}
+                {statusType === "same" && current && (
+                  <div style={{ fontSize: 12, color: "#6b6457", marginBottom: 12 }}>
+                    Your boarding house details are already on file above. Choose "Transferred" if you moved to a new boarding house.
+                  </div>
+                )}
                 {!houseComplete && (
                   <div style={{ fontSize: 12, color: "#8a6a1f", marginBottom: 12 }}>
                     Fill in all the fields above to continue to the photo and amenities.

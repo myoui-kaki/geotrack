@@ -76,11 +76,19 @@ export default function BarangayBoardingHouses() {
                       {h.has_barangay_permit ? "With permit" : h.rejected_at ? "Without permit" : "Not yet checked"}
                     </span>
                   </td>
-                  <td style={{whiteSpace:"nowrap",display:"flex",gap:6}}>
-                    <button className="btn primary" style={{padding:"5px 10px",fontSize:11}}
-                      disabled={h.has_barangay_permit} onClick={() => setPermit(h, true)}>With permit</button>
-                    <button className="btn" style={{padding:"5px 10px",fontSize:11,color:"var(--pin)"}}
-                      disabled={!h.has_barangay_permit && !!h.rejected_at} onClick={() => setPermit(h, false)}>Without permit</button>
+                  <td style={{whiteSpace:"nowrap"}}>
+                    {h.has_barangay_permit ? (
+                      <span style={{fontSize:11.5,color:"#857d6c"}}>Confirmed</span>
+                    ) : (
+                      <div style={{display:"flex",gap:6}}>
+                        <button className="btn primary" style={{padding:"5px 10px",fontSize:11}}
+                          onClick={() => setPermit(h, true)}>With permit</button>
+                        {!h.rejected_at && (
+                          <button className="btn" style={{padding:"5px 10px",fontSize:11,color:"var(--pin)"}}
+                            onClick={() => setPermit(h, false)}>Without permit</button>
+                        )}
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}
