@@ -71,13 +71,6 @@ export default function OsasVerification() {
       requireReason: true, reasonLabel: "Reason for rejection",
       reasonPlaceholder: "e.g. No business permit, address could not be found...",
     }),
-    unverify: h => ({
-      title: "Remove verification?",
-      message: `${h.name} will go back to Unverified. Tell the student why.`,
-      confirmText: "Remove verification", variant: "danger",
-      requireReason: true, reasonLabel: "Reason",
-      reasonPlaceholder: "e.g. Permit expired, inspection failed...",
-    }),
     delete: h => ({
       title: "Delete this boarding house?",
       message: `${h.name} and all of its reviews will be permanently removed.`,
@@ -92,16 +85,10 @@ export default function OsasVerification() {
     try {
       if (kind === "verify")        await api.osas.verifyBoardingHouse(house.id);
       else if (kind === "reject")   await api.osas.rejectBoardingHouse(house.id, reason);
-      else if (kind === "unverify") await api.osas.unverifyBoardingHouse(house.id, reason);
       else if (kind === "delete")   await api.osas.deleteBoardingHouse(house.id);
       setDialog(null); load();
     } catch(err) { setError(err.message); setDialog(null); }
     finally { setDialogBusy(false); }
-  }
-
-  function daysLeft(due) {
-    if (!due) return null;
-    return Math.ceil((new Date(due).getTime() - Date.now()) / 86400000);
   }
 
   function startEdit(h) {
@@ -227,27 +214,15 @@ export default function OsasVerification() {
 
                           {h.has_barangay_permit && <div style={{fontSize:10,color:"var(--moss-dark)",marginTop:2}}>Barangay-confirmed permit</div>}
 
-                          {h.verification_status === "unverified" && h.outside_coverage && (() => {
-                            const d = daysLeft(h.verification_due);
-                            return (
-                              <div style={{fontSize:11,marginTop:4,color: d < 0 ? "var(--pin)" : "#8a6a1f"}}>
-                                Outside Brgy. Del Remedio - OSAS verifies directly.{" "}
-                                <b>{d < 0 ? "Past 7 days - will be auto-rejected" : d === 0 ? "Due today - auto-rejects after this" : `${d} day${d===1?"":"s"} left`}</b>
-                              </div>
-                            );
-                          })()}
-                          {h.verification_status === "unverified" && !h.outside_coverage && (
-                            <div style={{fontSize:11,marginTop:4,color:"#857d6c"}}>Awaiting barangay permit confirmation.</div>
-                          )}
-                          {h.verification_remarks && h.verification_status !== "verified" && (
-                            <div style={{fontSize:11,marginTop:4,color:"#6b6457",whiteSpace:"normal"}}>
-                              <b>Remarks:</b> {h.verification_remarks}
-                            </div>
-                          )}
+                          <div style={{fontSize:11,marginTop:4,color:"#6b6457",whiteSpace:"normal"}}>
+                            <b>Remarks:</b>{" "}
+                            {h.verification_status === "unverified" ? "Waiting for approval of OSAS"
+                              : h.verification_status === "rejected" ? (h.verification_remarks || "-")
+                              : "-"}
+                          </div>
                         </td>
                         <td style={{whiteSpace:"nowrap"}}>
                           {h.verification_status !== "verified" && <button className="btn primary" style={{padding:"5px 10px",fontSize:11,marginRight:4}} onClick={() => setDialog({kind:"verify",house:h})}>Verify</button>}
-                          {h.verification_status === "verified" && <button className="btn" style={{padding:"5px 10px",fontSize:11,marginRight:4,color:"var(--pin)"}} onClick={() => setDialog({kind:"unverify",house:h})}>Unverify</button>}
                           {h.verification_status === "unverified" && <button className="btn" style={{padding:"5px 10px",fontSize:11,marginRight:4,color:"var(--pin)"}} onClick={() => setDialog({kind:"reject",house:h})}>Reject</button>}
                           <button className="btn" style={{padding:"5px 10px",fontSize:11,marginRight:4}} onClick={() => toggleReviews(h.id)}>
                             {expandedHouseId===h.id?"Hide reviews":"Reviews"}

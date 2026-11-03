@@ -59,17 +59,12 @@ export default function StudentHome() {
           <div className="quick-actions-grid">
             <button className="qa-btn" onClick={() => navigate("/student/status")}>
               <span className="qa-num"></span>
-              <span className="qa-label">Status update</span>
+              <span className="qa-label">Boarding house</span>
               <span className="qa-arrow" aria-hidden="true">↗</span>
             </button>
             <button className="qa-btn" onClick={() => navigate("/student/directory")}>
               <span className="qa-num"></span>
               <span className="qa-label">Directory</span>
-              <span className="qa-arrow" aria-hidden="true">↗</span>
-            </button>
-            <button className="qa-btn" onClick={() => navigate("/student/concern")}>
-              <span className="qa-num"></span>
-              <span className="qa-label">Report concern</span>
               <span className="qa-arrow" aria-hidden="true">↗</span>
             </button>
             <button className="qa-btn" onClick={() => navigate("/student/profile")}>

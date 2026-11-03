@@ -46,6 +46,8 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     user = db.query(models.User).filter(models.User.id == int(user_id)).first()
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
+    if user.archived_at is not None:
+        raise HTTPException(status_code=403, detail="This account has been archived.")
     return user
 
 def require_student(user: models.User = Depends(get_current_user)):

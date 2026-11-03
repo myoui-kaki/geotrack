@@ -61,6 +61,8 @@ export default function StudentLogin() {
   const [fullName, setFullName] = useState("");
   const [courseSection, setCourseSection] = useState("");
   const [gender, setGender] = useState("");
+  const [department, setDepartment] = useState("");
+  const [landlordEmail, setLandlordEmail] = useState("");
   const [bhName, setBhName] = useState("");
   const [bhBarangay, setBhBarangay] = useState("");
   const [bhAddress, setBhAddress] = useState("");
@@ -97,6 +99,14 @@ export default function StudentLogin() {
     e.preventDefault();
     setError("");
     if (!isLspu(email)) { setError("Only LSPU institutional emails (@lspu.edu.ph) are accepted."); return; }
+    if (mode === "register") {
+      const missing = [
+        [fullName, "full name"], [courseSection, "course & section"], [department, "department"], [gender, "sex"],
+        [bhName, "boarding house name"], [bhBarangay, "barangay"], [landlordName, "landlord name"],
+        [landlordEmail, "landlord email"], [landlordContact, "landlord contact number"],
+      ].filter(([v]) => !(v || "").trim()).map(([, l]) => l);
+      if (missing.length) { setError("Please fill in: " + missing.join(", ") + "."); return; }
+    }
     if (mode === "register" && !termsAgreed) { setError("Please agree to the Terms & Conditions first."); return; }
     setLoading(true);
     try {
@@ -106,14 +116,16 @@ export default function StudentLogin() {
       } else {
         session = await api.registerStudent({
           full_name: fullName, email, password,
-          course_section: courseSection || null,
-          gender: gender || null,
-          boarding_house_name: bhName || null,
-          boarding_house_barangay: bhBarangay || null,
+          course_section: courseSection.trim(),
+          department,
+          gender,
+          boarding_house_name: bhName.trim(),
+          boarding_house_barangay: bhBarangay.trim(),
           boarding_house_latitude: pinnedLocation?.lat ?? null,
           boarding_house_longitude: pinnedLocation?.lng ?? null,
-          landlord_name: landlordName || null,
-          landlord_contact: landlordContact || null,
+          landlord_name: landlordName.trim(),
+          landlord_email: landlordEmail.trim(),
+          landlord_contact: landlordContact.trim(),
         });
       }
       if (session.role !== "student") { setError("This account is not registered as a student."); setLoading(false); return; }
@@ -233,13 +245,20 @@ export default function StudentLogin() {
 
           {mode === "register" && <>
             <div className="field">
-              <label>Course &amp; section</label>
-              <input value={courseSection} onChange={e => setCourseSection(e.target.value)} placeholder="e.g. BSIT-3A" />
+              <label>Course &amp; section *</label>
+              <input value={courseSection} onChange={e => setCourseSection(e.target.value)} placeholder="e.g. BSIT-3A" required />
             </div>
             <div className="field">
-              <label>Sex <span style={{ color:"#a39c8a" }}>(optional)</span></label>
-              <select value={gender} onChange={e => setGender(e.target.value)}>
-                <option value="">Prefer not to say</option>
+              <label>Department *</label>
+              <select value={department} onChange={e => setDepartment(e.target.value)} required>
+                <option value="">Select department</option>
+                {["CCS","COE","CTE","CBAA","CIT","CCJE","CAS","CHMT"].map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label>Sex *</label>
+              <select value={gender} onChange={e => setGender(e.target.value)} required>
+                <option value="">Select sex</option>
                 <option value="male">Male</option>
                 <option value="female">Female</option>
               </select>
@@ -247,34 +266,35 @@ export default function StudentLogin() {
 
             <div style={{ margin:"4px 0 14px", padding:"12px 14px", background:"#eef1e9", borderRadius:10, border:"1px solid var(--line)" }}>
               <div style={{ fontSize:12.5, fontWeight:700, color:"var(--moss-dark)", marginBottom:6 }}>
-                Your boarding house <span style={{ fontWeight:400, color:"#6b6457" }}>(optional but recommended)</span>
+                Your boarding house <span style={{ fontWeight:400, color:"#6b6457" }}>(required)</span>
               </div>
               <p style={{ fontSize:11.5, color:"#6b6457", lineHeight:1.55, marginBottom:10 }}>
-                Adding it now lets OSAS see your location right away. You can add or update it later too.
+                Your boarding house and landlord details are needed to create your account.
               </p>
               <div className="field">
-                <label>Boarding house name</label>
-                <input value={bhName} onChange={e => { setBhName(e.target.value); setPinnedLocation(null); }} placeholder="e.g. Sto. Niño Lodge" />
+                <label>Boarding house name *</label>
+                <input required value={bhName} onChange={e => { setBhName(e.target.value); setPinnedLocation(null); }} placeholder="e.g. Sto. Niño Lodge" />
               </div>
               <div className="field">
-                <label>Barangay</label>
-                <input value={bhBarangay} onChange={e => { setBhBarangay(e.target.value); setPinnedLocation(null); }} placeholder="e.g. Brgy. Del Remedio" />
+                <label>Barangay *</label>
+                <input required value={bhBarangay} onChange={e => { setBhBarangay(e.target.value); setPinnedLocation(null); }} placeholder="e.g. Brgy. Del Remedio" />
               </div>
               <div className="field">
                 <label>Street / landmark <span style={{ color:"#a39c8a" }}>(optional)</span></label>
                 <input value={bhAddress} onChange={e => { setBhAddress(e.target.value); setPinnedLocation(null); }} placeholder="e.g. near SPC public market" />
               </div>
               <div className="field">
-                <label>Landlord name <span style={{ color:"#a39c8a" }}>(optional)</span></label>
-                <input value={landlordName} onChange={e => setLandlordName(e.target.value)} placeholder="e.g. Melba Belen" />
+                <label>Landlord name *</label>
+                <input required value={landlordName} onChange={e => setLandlordName(e.target.value)} placeholder="e.g. Melba Belen" />
               </div>
               <div className="field">
-                <label>Landlord contact number <span style={{ color:"#a39c8a" }}>(optional)</span></label>
-                <input value={landlordContact} onChange={e => setLandlordContact(e.target.value)} placeholder="e.g. 0917-503-4490" />
+                <label>Landlord email *</label>
+                <input type="email" required value={landlordEmail} onChange={e => setLandlordEmail(e.target.value)} placeholder="e.g. landlord@gmail.com" />
               </div>
-              <p style={{ fontSize:11, color:"#a39c8a", lineHeight:1.5, marginTop:-4, marginBottom:10 }}>
-                If OSAS doesn't have this on file yet for your boarding house, it will fill in automatically from what you provide here.
-              </p>
+              <div className="field">
+                <label>Landlord contact number *</label>
+                <input required value={landlordContact} onChange={e => setLandlordContact(e.target.value)} placeholder="e.g. 0917-503-4490" />
+              </div>
               <button type="button" className="btn" style={{ width:"100%", padding:10 }}
                 onClick={handleFindLocation} disabled={geocoding || !bhBarangay.trim()}>
                 {geocoding ? "Finding location..." : "Find location on map"}

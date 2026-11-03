@@ -17,6 +17,8 @@ class User(Base):
     course_section = Column(String, nullable=True)
     gender = Column(String, nullable=True)
     position = Column(String, nullable=True)
+    # College/department of a student (CCS, COE, CTE, CBAA, CIT, CCJE, CAS, CHMT).
+    department = Column(String, nullable=True)
     # Only set for role="barangay" - which barangay this account represents,
     # e.g. "Brgy. Del Remedio". Used to scope what that account can see.
     barangay_name = Column(String, nullable=True)
@@ -86,6 +88,7 @@ class BoardingHouse(Base):
     # coordination purposes.
     contact_person = Column(String, nullable=True)
     contact_number = Column(String, nullable=True)
+    contact_email = Column(String, nullable=True)   # landlord email
 
     # A boarding house is only ever "is_verified" if it is in a barangay that
     # participates in the permit-verification workflow (currently only
@@ -115,12 +118,8 @@ class BoardingHouse(Base):
 
     @property
     def verification_due(self):
-        """Outside-coverage submissions get a 1-week window for OSAS to
-        verify directly; None once verified/rejected or when a barangay
-        account handles it."""
-        if self.is_verified or self.rejected_at is not None or not self.outside_coverage:
-            return None
-        return (self.created_at or datetime.utcnow()) + timedelta(days=VERIFICATION_WINDOW_DAYS)
+        """No automatic deadline any more - OSAS verifies or rejects manually."""
+        return None
 
     status_updates = relationship("StatusUpdate", back_populates="boarding_house", cascade="all, delete-orphan")
     reviews        = relationship("Review",        back_populates="boarding_house", cascade="all, delete-orphan")
@@ -150,6 +149,23 @@ class StatusUpdate(Base):
 
     student        = relationship("User",          back_populates="status_updates")
     boarding_house = relationship("BoardingHouse", back_populates="status_updates")
+
+    @property
+    def boarding_house_name(self):
+        """Where the student is boarding as of this update (shown to OSAS)."""
+        if self.status_type == "moved_home":
+            return None
+        if self.boarding_house is not None:
+            return self.boarding_house.name
+        return self.new_boarding_house_name
+
+    @property
+    def boarding_house_barangay(self):
+        if self.status_type == "moved_home":
+            return None
+        if self.boarding_house is not None:
+            return self.boarding_house.barangay
+        return self.new_barangay
 
 
 class Review(Base):

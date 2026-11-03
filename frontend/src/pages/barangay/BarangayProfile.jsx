@@ -1,14 +1,10 @@
 // src/pages/barangay/BarangayProfile.jsx
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import { useAuth } from "../../context/AuthContext";
-import InstallAppButton from "../../components/InstallAppButton";
-import { dialog } from "../../components/dialogs";
 
 export default function BarangayProfile() {
-  const { fullName: sessionFullName, logout, updateFullName } = useAuth();
-  const navigate = useNavigate();
+  const { fullName: sessionFullName, updateFullName } = useAuth();
 
   const [profile, setProfile] = useState(null);
   const [loadError, setLoadError] = useState("");
@@ -20,6 +16,8 @@ export default function BarangayProfile() {
   // if that loaded, otherwise the name saved at login).
   const [fullNameInput, setFullNameInput] = useState(sessionFullName || "");
   const [contactNumber, setContactNumber] = useState("");
+  const [email, setEmail] = useState("");
+  const [position, setPosition] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [saved, setSaved] = useState(false);
@@ -30,6 +28,8 @@ export default function BarangayProfile() {
         setProfile(p);
         setFullNameInput(p.full_name || "");
         setContactNumber(p.contact_number || "");
+        setEmail(p.email || "");
+        setPosition(p.position || "");
       })
       .catch(err => {
         setLoadError(
@@ -41,18 +41,14 @@ export default function BarangayProfile() {
       .finally(() => setLoading(false));
   }, []);
 
-  async function handleLogout() {
-    if (!(await dialog.confirm({ title:"Sign out?", message:"You'll need to sign in again to continue.", confirmText:"Sign out" }))) return;
-    logout();
-    navigate("/barangay/login");
-  }
-
   async function handleSave() {
     setSaving(true); setSaveError(""); setSaved(false);
     try {
       const updated = await api.barangay.updateProfile({
         full_name: fullNameInput.trim() || null,
         contact_number: contactNumber.trim() || null,
+        email: email.trim() || null,
+        position: position.trim() || null,
       });
       setProfile(updated);
       updateFullName?.(updated.full_name);
@@ -86,12 +82,6 @@ export default function BarangayProfile() {
           <div className="loading-text">Loading...</div>
         ) : (
           <>
-            {profile && (
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 11, color: "#857d6c", fontWeight: 600 }}>Email</div>
-                <div style={{ fontSize: 14 }}>{profile.email}</div>
-              </div>
-            )}
             {profile?.barangay_name && (
               <div style={{ marginBottom: 14 }}>
                 <div style={{ fontSize: 11, color: "#857d6c", fontWeight: 600 }}>Barangay assigned</div>
@@ -108,6 +98,16 @@ export default function BarangayProfile() {
               <input type="text" placeholder="e.g. Juan Dela Cruz"
                 value={fullNameInput} onChange={e => setFullNameInput(e.target.value)} />
             </div>
+            <div className="field" style={{ marginBottom: 12 }}>
+              <label>Position</label>
+              <input type="text" placeholder="e.g. Barangay Captain"
+                value={position} onChange={e => setPosition(e.target.value)} />
+            </div>
+            <div className="field" style={{ marginBottom: 12 }}>
+              <label>Email</label>
+              <input type="email" placeholder="name@example.com"
+                value={email} onChange={e => setEmail(e.target.value)} />
+            </div>
             <div className="field" style={{ marginBottom: 8 }}>
               <label>Contact number</label>
               <input type="tel" placeholder="e.g. 09171234567"
@@ -121,18 +121,11 @@ export default function BarangayProfile() {
               </div>
             )}
 
-            <button className="btn primary" style={{ width: "100%", padding: 12, marginBottom: 10 }}
+            <button className="btn primary" style={{ width: "100%", padding: 12 }}
               disabled={saving} onClick={handleSave}>
               {saving ? "Saving..." : "Save"}
             </button>
 
-            {/* Hides itself when the app is already installed or the browser
-                can't install it, so it only shows when it can actually work. */}
-            <div style={{ marginBottom: 10 }}><InstallAppButton variant="block" /></div>
-
-            <button className="btn" style={{ width: "100%", padding: 12 }} onClick={handleLogout}>
-              Sign out
-            </button>
           </>
         )}
       </div>

@@ -85,17 +85,12 @@ export default function StudentLayout() {
 
           <NavLink to="/student/status" onClick={closeMenu}
             className={({ isActive }) => `nav-btn ${isActive ? "active" : ""}`}>
-            <div className="ic"></div>Status
+            <div className="ic"></div>Boarding house
           </NavLink>
 
           <NavLink to="/student/directory" onClick={closeMenu}
             className={({ isActive }) => `nav-btn ${isActive ? "active" : ""}`}>
             <div className="ic"></div>Directory
-          </NavLink>
-
-          <NavLink to="/student/concern" onClick={closeMenu}
-            className={({ isActive }) => `nav-btn ${isActive ? "active" : ""}`}>
-            <div className="ic"></div>Concerns
           </NavLink>
 
           <NavLink to="/student/sos" onClick={closeMenu}

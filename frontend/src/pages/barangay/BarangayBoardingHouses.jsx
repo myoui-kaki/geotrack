@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "../../api/client";
-import InstallAppButton from "../../components/InstallAppButton";
+import { dialog } from "../../components/dialogs";
 import BarangayGeoMap from "../../components/BarangayGeoMap";
 
 export default function BarangayBoardingHouses() {
@@ -25,8 +25,13 @@ export default function BarangayBoardingHouses() {
       .finally(() => setLoading(false));
   }
 
-  async function setPermit(hid, value) {
-    try { await api.barangay.confirmPermit(hid, value); load(); }
+  async function setPermit(h, value) {
+    if (!value && !(await dialog.confirm({
+      title: "Mark as without permit?",
+      message: `"${h.name}" will be marked Rejected (without permit) and the student and OSAS will be notified.`,
+      confirmText: "Without permit", danger: true,
+    }))) return;
+    try { await api.barangay.confirmPermit(h.id, value); load(); }
     catch (err) { setError(err.message); }
   }
 
@@ -36,11 +41,10 @@ export default function BarangayBoardingHouses() {
         <div>
           <div className="osas-main-title">Boarding house permits</div>
           <div className="osas-main-sub">
-            Boarding houses located in your barangay. Confirming a valid business permit here marks
-            the boarding house "Verified" for students and OSAS.
+            Boarding houses located in your barangay. Mark each one "With permit" (Verified) or
+            "Without permit" (Rejected).
           </div>
         </div>
-        <InstallAppButton />
       </div>
 
       {error && <div className="error-banner">{error}</div>}
@@ -63,14 +67,15 @@ export default function BarangayBoardingHouses() {
                   <td style={{fontSize:12,color:"#6b6457"}}>{h.contact_person || "-"}</td>
                   <td style={{fontSize:12,color:"#6b6457"}}>{h.contact_number || "-"}</td>
                   <td>
-                    <span className={`badge ${h.has_barangay_permit ? "ok" : "pending"}`}>
-                      {h.has_barangay_permit ? "Permit confirmed" : "Permit not yet confirmed"}
+                    <span className={`badge ${h.has_barangay_permit ? "ok" : h.rejected_at ? "bad" : "pending"}`}>
+                      {h.has_barangay_permit ? "With permit" : h.rejected_at ? "Without permit" : "Not yet checked"}
                     </span>
                   </td>
-                  <td style={{whiteSpace:"nowrap"}}>
-                    {!h.has_barangay_permit
-                      ? <button className="btn primary" style={{padding:"5px 10px",fontSize:11}} onClick={() => setPermit(h.id, true)}>Confirm permit</button>
-                      : <button className="btn" style={{padding:"5px 10px",fontSize:11,color:"var(--pin)"}} onClick={() => setPermit(h.id, false)}>Revoke / not confirmed</button>}
+                  <td style={{whiteSpace:"nowrap",display:"flex",gap:6}}>
+                    <button className="btn primary" style={{padding:"5px 10px",fontSize:11}}
+                      disabled={h.has_barangay_permit} onClick={() => setPermit(h, true)}>With permit</button>
+                    <button className="btn" style={{padding:"5px 10px",fontSize:11,color:"var(--pin)"}}
+                      disabled={!h.has_barangay_permit && !!h.rejected_at} onClick={() => setPermit(h, false)}>Without permit</button>
                   </td>
                 </tr>
               ))}

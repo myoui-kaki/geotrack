@@ -1,160 +1,113 @@
-// src/pages/osas/OsasDashboard.jsx - with charts, stats, recent activities
+// src/pages/osas/OsasDashboard.jsx
+// The dashboard is the report, shown as live charts: students per boarding
+// house, students per barangay, boarding houses per barangay, sex, and
+// every department (zero when empty).
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, LabelList } from "recharts";
 import { api } from "../../api/client";
-import { useAuth } from "../../context/AuthContext";
-import OsasGeoMap from "../../components/OsasGeoMap";
-import CountUp from "../../components/CountUp";
+import MonthFilterDropdown from "../../components/MonthFilterDropdown";
 
-const COLORS = ["#2f5d4f","#c1502e","#d4a017","#5a8a3c","#6b6457","#203f36","#e07b39","#3c7a5c"];
+const GROUPS = ["boarding_house", "barangay", "barangay_houses", "gender", "department"];
+const TITLES = {
+  boarding_house: "Students per boarding house",
+  barangay: "Students per barangay",
+  barangay_houses: "Boarding houses per barangay",
+  gender: "Students by sex",
+  department: "Students by department",
+};
+const COLORS = ["#2f5d4f", "#c1502e", "#d4a017", "#5a8a3c", "#6b6457", "#203f36", "#e07b39", "#3c7a5c"];
 
-function ActionIcon({ action }) {
-  const icons = { create:"+", update:"(edit)", delete:"x", flag:"(flag)", verify:"(ok)", archive:"", login:"->", logout:"<-", export:"v" };
-  return <span style={{marginRight:6}}>{icons[action]||"-"}</span>;
+function Kpi({ label, value, tone }) {
+  return (
+    <div className="card" style={{ padding: "14px 16px" }}>
+      <div style={{ fontSize: 11.5, color: "#857d6c", fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: 28, fontWeight: 800, color: tone || "var(--moss-dark)", lineHeight: 1.2 }}>{value ?? "-"}</div>
+    </div>
+  );
+}
+
+function Chart({ sec }) {
+  const unit = sec.group_by === "barangay_houses" ? "Boarding houses" : "Students";
+  if (!sec.rows.length) return <div className="review-empty">No data.</div>;
+  if (sec.group_by === "gender") {
+    return (
+      <ResponsiveContainer width="100%" height={200}>
+        <PieChart>
+          <Pie data={sec.rows} dataKey="count" nameKey="group_label" cx="40%" cy="50%" outerRadius={70}
+            label={({ count }) => count} labelLine={false}>
+            {sec.rows.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+          </Pie>
+          <Tooltip formatter={v => [`${v} Students`, "Total"]} />
+          <Legend layout="vertical" align="right" verticalAlign="middle" iconType="circle"
+            wrapperStyle={{ fontSize: 12 }} formatter={(v, e) => `${v} (${e.payload.count})`} />
+        </PieChart>
+      </ResponsiveContainer>
+    );
+  }
+  const w = Math.min(220, Math.max(90, Math.max(0, ...sec.rows.map(r => r.group_label.length)) * 6));
+  return (
+    <ResponsiveContainer width="100%" height={Math.max(180, sec.rows.length * 38)}>
+      <BarChart data={sec.rows} layout="vertical" margin={{ top: 5, right: 34, left: 10, bottom: 5 }}>
+        <XAxis type="number" tick={{ fontSize: 10 }} allowDecimals={false} />
+        <YAxis type="category" dataKey="group_label" tick={{ fontSize: 10 }} width={w} interval={0} />
+        <Tooltip formatter={v => [v, unit]} />
+        <Bar dataKey="count" name={unit} fill="#2f5d4f" radius={[0, 4, 4, 0]}>
+          <LabelList dataKey="count" position="right" style={{ fontSize: 11, fontWeight: 700, fill: "#3a352b" }} />
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
 }
 
 export default function OsasDashboard() {
-  const { fullName } = useAuth();
-  const navigate = useNavigate();
+  const [month, setMonth] = useState(new Date().toLocaleString("en-US", { month: "long", year: "numeric" }));
   const [stats, setStats] = useState(null);
-  const [flagged, setFlagged] = useState([]);
+  const [report, setReport] = useState(null);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
 
+  useEffect(() => { api.osas.dashboard().then(setStats).catch(e => setError(e.message)); }, []);
   useEffect(() => {
-    api.osas.dashboard().then(setStats).catch(err => setError(err.message));
-    api.osas.allStatusUpdates({ is_flagged: true })
-      .then(setFlagged).catch(() => {});
-  }, []);
+    setLoading(true);
+    api.osas.generateTallyReport(GROUPS, month || null)
+      .then(r => { setReport(r); setError(""); })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [month]);
 
   return (
     <>
       <div className="osas-main-head">
         <div>
-          <div className="osas-main-title">OSAS Dashboard</div>
-          <div className="osas-main-sub">Real-time view of all off-campus students, San Pablo City.</div>
+          <div className="osas-main-title">Dashboard</div>
+          <div className="osas-main-sub">Live report charts{month ? ` as of ${month}` : " for all months"}.</div>
         </div>
-        <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-          <div className="osas-user-chip">
-            <div className="osas-avatar">{(fullName||"OS").slice(0,2).toUpperCase()}</div> {fullName}
-          </div>
-        </div>
+        <MonthFilterDropdown month={month} onChange={setMonth} />
       </div>
 
       {error && <div className="error-banner">{error}</div>}
 
       {stats && (
-        <>
-          {/* -- Stat cards -- */}
-          <div className="osas-grid osas-stat-row">
-            {[
-              { label:"Total students",       val:stats.total_students,         tag:"registered accounts",  color:"var(--ink)" },
-              { label:"Updates submitted",    val:stats.updates_submitted,      tag:"all-time total",       color:"var(--ink)" },
-              { label:"Flagged students",     val:stats.flagged_students,       tag:"needs follow-up",      color:"var(--pin)" },
-              { label:"Unverified boarding houses",val:stats.pending_verifications,  tag:"boarding houses",      color:"var(--warn)" },
-            ].map(s => (
-              <div className="card osas-stat-card" key={s.label}>
-                <div className="stat-label">{s.label}</div>
-                <div className="stat-num" style={{color:s.color}}><CountUp value={s.val} /></div>
-                <div className="stat-tag warn">{s.tag}</div>
+        <div className="osas-grid" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 14, marginBottom: 18 }}>
+          <Kpi label="Total students" value={stats.total_students} />
+          <Kpi label="Status updates submitted" value={stats.updates_submitted} />
+          <Kpi label="Waiting for OSAS approval" value={stats.pending_verifications} tone="#d4a017" />
+          <Kpi label="Active emergencies" value={stats.active_emergencies} tone={stats.active_emergencies ? "#c1502e" : undefined} />
+        </div>
+      )}
+
+      {loading && !report ? <div className="loading-text">Loading...</div> : report && (
+        <div className="osas-grid" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(340px,1fr))", gap: 18 }}>
+          {report.sections.map(sec => (
+            <div className="card" key={sec.group_by}>
+              <div className="panel-title" style={{ marginBottom: 4 }}>{TITLES[sec.group_by] || sec.title}</div>
+              <div style={{ fontSize: 11.5, color: "#857d6c", marginBottom: 10 }}>
+                Total: {sec.total}
               </div>
-            ))}
-          </div>
-
-          {/* -- Map + Flagged -- */}
-          <div className="osas-grid osas-two-col" style={{marginBottom:18}}>
-            <div className="card">
-              <div className="panel-title">Geo-tagged student locations</div>
-              <OsasGeoMap height={300} />
-              <div className="btn-row" style={{marginTop:14,display:"flex",gap:10}}>
-                <button className="btn primary" onClick={() => navigate("/osas/status-updates")}>Open full map</button>
-                <button className="btn" onClick={() => navigate("/osas/verification")}>Manage boarding houses</button>
-              </div>
+              <Chart sec={sec} />
             </div>
-            <div className="card">
-              <div className="panel-title">Flagged students</div>
-              {flagged.length === 0
-                ? <div className="review-empty">No flagged students right now.</div>
-                : <table><tbody>
-                    <tr><th>Student</th><th>Reason</th><th></th></tr>
-                    {flagged.slice(0,6).map(u => (
-                      <tr key={u.id}>
-                        <td>{u.student_name}</td>
-                        <td style={{fontSize:12,color:"#6b6457"}}>{u.flag_reason||"-"}</td>
-                        <td><span className="badge warn">Flagged</span></td>
-                      </tr>
-                    ))}
-                  </tbody></table>
-              }
-            </div>
-          </div>
-
-          {/* -- Charts -- */}
-          <div className="osas-grid osas-two-col" style={{marginBottom:18}}>
-            <div className="card">
-              <div className="panel-title">Students by sex</div>
-              {stats.by_gender.length === 0
-                ? <div className="review-empty">No data yet.</div>
-                : <ResponsiveContainer width="100%" height={220}>
-                    <PieChart>
-                      <Pie data={stats.by_gender} dataKey="count" nameKey="label"
-                           cx="50%" cy="50%" outerRadius={80} label={({label,count})=>`${label}: ${count}`}>
-                        {stats.by_gender.map((_,i) => <Cell key={i} fill={COLORS[i%COLORS.length]} />)}
-                      </Pie>
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-              }
-            </div>
-            <div className="card">
-              <div className="panel-title">Students by department</div>
-              {stats.by_department.length === 0
-                ? <div className="review-empty">No data yet.</div>
-                : <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={stats.by_department} margin={{top:5,right:10,left:-20,bottom:20}}>
-                      <XAxis dataKey="label" tick={{fontSize:10}} angle={-25} textAnchor="end" />
-                      <YAxis tick={{fontSize:10}} allowDecimals={false} />
-                      <Tooltip />
-                      <Bar dataKey="count" name="Students" fill="#2f5d4f" radius={[4,4,0,0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-              }
-            </div>
-          </div>
-
-          <div className="osas-grid osas-two-col" style={{marginBottom:18}}>
-            <div className="card">
-              <div className="panel-title">Students by barangay</div>
-              {stats.by_barangay.length === 0
-                ? <div className="review-empty">No location data yet.</div>
-                : <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={stats.by_barangay} layout="vertical" margin={{top:5,right:20,left:80,bottom:5}}>
-                      <XAxis type="number" tick={{fontSize:10}} allowDecimals={false} />
-                      <YAxis dataKey="label" type="category" tick={{fontSize:9}} width={80} />
-                      <Tooltip />
-                      <Bar dataKey="count" name="Students" fill="#c1502e" radius={[0,4,4,0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-              }
-            </div>
-            <div className="card">
-              <div className="panel-title">Monthly status breakdown</div>
-              {stats.by_status.length === 0
-                ? <div className="review-empty">No status updates yet.</div>
-                : <ResponsiveContainer width="100%" height={220}>
-                    <PieChart>
-                      <Pie data={stats.by_status} dataKey="count" nameKey="label"
-                           cx="50%" cy="50%" innerRadius={50} outerRadius={80}
-                           label={({label,count})=>`${label}: ${count}`}>
-                        {stats.by_status.map((_,i) => <Cell key={i} fill={COLORS[i%COLORS.length]} />)}
-                      </Pie>
-                      <Tooltip /><Legend />
-                    </PieChart>
-                  </ResponsiveContainer>
-              }
-            </div>
-          </div>
-        </>
+          ))}
+        </div>
       )}
     </>
   );

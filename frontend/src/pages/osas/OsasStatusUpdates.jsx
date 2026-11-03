@@ -1,64 +1,8 @@
 // src/pages/osas/OsasStatusUpdates.jsx - with search + filter panel
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import MonthCalendar, { monthLabel } from "../../components/MonthCalendar";
+import { useEffect, useState } from "react";
+import MonthFilterDropdown from "../../components/MonthFilterDropdown";
 import { api } from "../../api/client";
 import { dialog } from "../../components/dialogs";
-
-// Dropdown button that opens the month calendar right under it. The panel is
-// rendered on document.body (so no card/overflow can clip it) and placed with
-// page coordinates, so it stays attached to the button even when the page is
-// scrolled sideways.
-function MonthFilterDropdown({ month, onChange }) {
-  const now = new Date();
-  const [open, setOpen] = useState(false);
-  const [viewYear, setViewYear] = useState(now.getFullYear());
-  const [viewMonth, setViewMonth] = useState(now.getMonth());
-  const [pos, setPos] = useState({ top:0, left:0, width:340 });
-  const btnRef = useRef(null);
-
-  function toggle() {
-    if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      const sx = window.scrollX || 0, sy = window.scrollY || 0;
-      const vw = document.documentElement.clientWidth;
-      const width = Math.min(340, vw - 16);
-      const left = sx + Math.max(8, Math.min(r.left, vw - width - 8));
-      setPos({ top: sy + r.bottom + 4, left, width });
-    }
-    setOpen(v => !v);
-  }
-
-  return (
-    <div>
-      <button ref={btnRef} type="button" className="btn"
-        style={{ minWidth:170, textAlign:"left", display:"flex", justifyContent:"space-between", alignItems:"center" }}
-        onClick={toggle}>
-        <span>📅 {month || "All months"}</span>
-        <span style={{ color:"#a39c8a" }}>{open ? "▴" : "▾"}</span>
-      </button>
-      {open && createPortal(
-        <>
-          <div onClick={() => setOpen(false)} style={{ position:"fixed", inset:0, zIndex:1000, background:"transparent" }} />
-          <div style={{
-            position:"absolute", top:pos.top, left:pos.left, width:pos.width, zIndex:1001,
-            background:"#fff", border:"1px solid var(--line)", borderRadius:12,
-            boxShadow:"0 8px 24px rgba(28,43,36,.18)", padding:12, boxSizing:"border-box",
-          }}>
-            <MonthCalendar year={viewYear} month={viewMonth} onSelect={(y,m) => {
-              setViewYear(y); setViewMonth(m); onChange(monthLabel(y, m)); setOpen(false);
-            }} />
-            <button type="button" className="btn" style={{ width:"100%", marginTop:8, fontSize:12 }}
-              onClick={() => { onChange(""); setOpen(false); }}>
-              Clear (show all months)
-            </button>
-          </div>
-        </>,
-        document.body
-      )}
-    </div>
-  );
-}
 
 export default function OsasStatusUpdates() {
   const [updates, setUpdates] = useState([]);
@@ -162,7 +106,7 @@ export default function OsasStatusUpdates() {
           <table>
             <tbody>
               <tr>
-                <th>Student</th><th>Month</th><th>Status</th>
+                <th>Student</th><th>Month</th><th>Status</th><th>Boarding house</th>
                 <th>Note</th><th>Documentation</th><th></th>
               </tr>
               {displayed.map(u => (
@@ -175,8 +119,16 @@ export default function OsasStatusUpdates() {
                     <td>{u.month_label}</td>
                     <td>
                       {u.status_type==="same"       && "Same boarding house"}
-                      {u.status_type==="transferred" && `Transferred -> ${u.new_boarding_house_name||""}${u.new_barangay ? ` (${u.new_barangay})` : ""}`}
+                      {u.status_type==="transferred" && "Transferred to a new boarding house"}
                       {u.status_type==="moved_home"  && "Moved back home"}
+                    </td>
+                    <td style={{fontSize:12.5}}>
+                      {u.status_type==="moved_home" ? "-" : (
+                        <>
+                          <div style={{fontWeight:600}}>{u.boarding_house_name || "-"}</div>
+                          {u.boarding_house_barangay && <div style={{fontSize:11,color:"#a39c8a"}}>{u.boarding_house_barangay}</div>}
+                        </>
+                      )}
                     </td>
                     <td style={{maxWidth:200,fontSize:12,color:"#6b6457"}}>{u.note||"-"}</td>
                     <td>
@@ -209,7 +161,7 @@ export default function OsasStatusUpdates() {
                   </tr>
                   {expandedId === u.id && (
                     <tr key={`doc-${u.id}`}>
-                      <td colSpan={6} style={{background:"#faf9f5",padding:"10px 12px"}}>
+                      <td colSpan={7} style={{background:"#faf9f5",padding:"10px 12px"}}>
                         {u.photo_data_url && (
                           <img src={u.photo_data_url} alt="Boarding house condition"
                             style={{maxWidth:280,borderRadius:8,border:"1px solid var(--line)"}} />

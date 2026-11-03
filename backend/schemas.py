@@ -40,14 +40,25 @@ class RegisterStudentRequest(BaseModel):
     full_name: str
     email: EmailStr
     password: str
-    course_section: Optional[str] = None
-    gender: Optional[Literal["male", "female", "prefer_not_to_say"]] = None
-    boarding_house_name: Optional[str] = None
-    boarding_house_barangay: Optional[str] = None
+    course_section: str
+    department: Literal["CCS", "COE", "CTE", "CBAA", "CIT", "CCJE", "CAS", "CHMT"]
+    gender: Literal["male", "female"]
+    boarding_house_name: str
+    boarding_house_barangay: str
     boarding_house_latitude: Optional[float] = None
     boarding_house_longitude: Optional[float] = None
-    landlord_name: Optional[str] = None
-    landlord_contact: Optional[str] = None
+    landlord_name: str
+    landlord_email: EmailStr
+    landlord_contact: str
+
+    @field_validator("full_name", "course_section", "boarding_house_name",
+                     "boarding_house_barangay", "landlord_name", "landlord_contact")
+    @classmethod
+    def not_blank(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("This field is required.")
+        return v
 
     @field_validator("email")
     @classmethod
@@ -134,6 +145,7 @@ class BoardingHouseOut(BaseModel):
     latitude: Optional[float] = None; longitude: Optional[float] = None
     is_verified: bool; submitted_by: Optional[str] = None
     contact_person: Optional[str] = None; contact_number: Optional[str] = None
+    contact_email: Optional[str] = None
     has_barangay_permit: bool = False
     verification_status: str = "unverified"
     verification_remarks: Optional[str] = None
@@ -149,6 +161,7 @@ class BoardingHouseUpdate(BaseModel):
     latitude: Optional[float] = None; longitude: Optional[float] = None
     submitted_by: Optional[str] = None
     contact_person: Optional[str] = None; contact_number: Optional[str] = None
+    contact_email: Optional[str] = None
 
 class BoardingHouseReject(BaseModel):
     reason: Optional[str] = None   # required by the endpoint (min 5 chars)
@@ -167,12 +180,15 @@ class BarangayProfileOut(BaseModel):
     # crash every response for that account with a 500.
     id: int; full_name: str; email: str
     barangay_name: Optional[str] = None
+    position: Optional[str] = None
     contact_number: Optional[str] = None
     created_at: datetime
     class Config: from_attributes = True
 
 class BarangayProfileUpdate(BaseModel):
     full_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    position: Optional[str] = None
     contact_number: Optional[str] = None
 
 class OsasProfileOut(BaseModel):
@@ -217,6 +233,13 @@ class StatusUpdateCreate(BaseModel):
     month_label: str
     photo_data_url: Optional[str] = None
     amenities_checklist: Optional[List[str]] = None
+    # Boarding house + landlord details - required (checked in the endpoint)
+    # whenever the student is still boarding ("same" or "transferred").
+    boarding_house_name: Optional[str] = None
+    boarding_house_barangay: Optional[str] = None
+    landlord_name: Optional[str] = None
+    landlord_email: Optional[str] = None
+    landlord_contact: Optional[str] = None
 
 class StatusUpdateEdit(BaseModel):
     status_type: Optional[Literal["same", "transferred", "moved_home"]] = None
@@ -235,6 +258,8 @@ class StatusUpdateOut(BaseModel):
     flag_reason: Optional[str] = None; created_at: datetime
     photo_data_url: Optional[str] = None
     amenities_checklist: Optional[str] = None
+    boarding_house_name: Optional[str] = None
+    boarding_house_barangay: Optional[str] = None
     class Config: from_attributes = True
 
 class StatusUpdateAdminOut(StatusUpdateOut):
@@ -274,7 +299,24 @@ class ConcernAdminOut(ConcernOut):
 class OsasAccountOut(BaseModel):
     # output schema - plain str, see BarangayProfileOut above.
     id: int; full_name: str; email: str; position: Optional[str] = None
+    contact_number: Optional[str] = None
+    archived_at: Optional[datetime] = None
     class Config: from_attributes = True
+
+class BarangayAccountOut(BaseModel):
+    id: int; full_name: str; email: str
+    position: Optional[str] = None; contact_number: Optional[str] = None
+    barangay_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+    archived_at: Optional[datetime] = None
+    class Config: from_attributes = True
+
+class ArchivedAccountOut(BaseModel):
+    id: int; role: str; full_name: str; email: str
+    position: Optional[str] = None; contact_number: Optional[str] = None
+    barangay_name: Optional[str] = None
+    course_section: Optional[str] = None; department: Optional[str] = None
+    archived_at: Optional[datetime] = None
 
 class OsasAccountUpdate(BaseModel):
     full_name: Optional[str] = None; position: Optional[str] = None
@@ -282,6 +324,7 @@ class OsasAccountUpdate(BaseModel):
 class StudentAccountOut(BaseModel):
     id: int; full_name: str; email: str
     course_section: Optional[str] = None; gender: Optional[str] = None
+    department: Optional[str] = None
     created_at: datetime; is_archived: bool = False
     archived_at: Optional[datetime] = None
     class Config: from_attributes = True
@@ -289,6 +332,8 @@ class StudentAccountOut(BaseModel):
 class MyProfileOut(BaseModel):
     id: int; full_name: str; email: str
     course_section: Optional[str] = None; gender: Optional[str] = None
+    department: Optional[str] = None
+    landlord_email: Optional[str] = None
     created_at: datetime; two_fa_enabled: bool = False
     # Current boarding house, populated server-side from the student's most
     # recent status update (not stored on the user record itself).
@@ -301,7 +346,8 @@ class MyProfileOut(BaseModel):
 class MyProfileUpdate(BaseModel):
     full_name: Optional[str] = None
     course_section: Optional[str] = None
-    gender: Optional[Literal["male", "female", "prefer_not_to_say"]] = None
+    gender: Optional[Literal["male", "female"]] = None
+    department: Optional[Literal["CCS", "COE", "CTE", "CBAA", "CIT", "CCJE", "CAS", "CHMT"]] = None
 
 
 # ─── Tally report ─────────────────────────────────────────────────────────────
@@ -311,6 +357,13 @@ class TallyReportRow(BaseModel):
 
 class TallyReportSection(BaseModel):
     group_by: str; rows: List[TallyReportRow]; total: int
+    # Ready-to-print table (Student column always first) shared by the
+    # on-screen report and the CSV / Excel / PDF exports.
+    title: Optional[str] = None
+    columns: List[str] = []
+    table: List[List[str]] = []
+    bold_rows: List[int] = []
+    total_label: Optional[str] = None
 
 class TallyReportOut(BaseModel):
     group_by: str; month_label: Optional[str] = None

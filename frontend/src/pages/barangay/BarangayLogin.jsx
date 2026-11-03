@@ -64,7 +64,7 @@ export default function BarangayLogin() {
           <div>
             <div className="osas-brand-title">Barangay coordination portal.</div>
             <div className="osas-brand-sub">
-              Confirm boarding house permits, and stay aware of student emergencies and concerns in your barangay.
+              Confirm boarding house permits, and stay aware of student emergencies in your barangay.
             </div>
           </div>
         </div>

@@ -1,6 +1,6 @@
 // src/pages/barangay/BarangayLayout.jsx
 //
-// Only 3 nav destinations here, unlike Student (6) or OSAS (6) - too few
+// Only 2 nav destinations here, unlike Student (6) or OSAS (6) - too few
 // to justify a hamburger + slide-in drawer. On mobile they're shown
 // directly as a fixed bottom tab bar instead (one tap, no menu to open
 // first). Desktop keeps the same docked sidebar as OSAS for consistency.
@@ -14,11 +14,10 @@ import { dialog } from "../../components/dialogs";
 const NAV_ITEMS = [
   ["/barangay/boarding-houses", "Boarding house permits", "Permits"],
   ["/barangay/emergencies",     "Student emergencies",    "Emergencies"],
-  ["/barangay/concerns",        "Reported concerns",      "Concerns"],
 ];
 
 // Desktop sidebar also gets a Profile link (mobile reaches it via the
-// icon in the top bar instead, keeping the bottom tab bar at just the 3
+// icon in the top bar instead, keeping the bottom tab bar at just the
 // main destinations).
 const DESKTOP_NAV_ITEMS = [...NAV_ITEMS, ["/barangay/profile", "Profile"]];
 

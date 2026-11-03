@@ -4,35 +4,21 @@ import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveCo
 import { api, API_BASE_URL } from "../../api/client";
 import { toPng } from "html-to-image";
 import { dialog } from "../../components/dialogs";
+import MonthFilterDropdown from "../../components/MonthFilterDropdown";
 
-const MONTHS = [
-  "",
-  new Date().toLocaleString("en-US", { month: "long", year: "numeric" }),
-  "July 2026",
-  "June 2026",
-  "May 2026",
-  "April 2026"
-];
 const GROUP_OPTIONS = [
-  { value:"boarding_house", label:"Boarding house (place name & barangay)" },
-  { value:"gender",         label:"Sex" },
-  { value:"department",     label:"Department (CCS, COE, CTE, ...)" },
-  { value:"monthly_status", label:"Monthly status" },
+  { value:"boarding_house",  label:"Students per boarding house" },
+  { value:"barangay",        label:"Students per barangay (listing per barangay)" },
+  { value:"barangay_houses", label:"Boarding houses per barangay" },
+  { value:"gender",          label:"Sex" },
+  { value:"department",      label:"Department (all departments)" },
 ];
-const SECTION_LABELS = { boarding_house:"Boarding house (place name & barangay)",
-  gender:"Sex", department:"Department", monthly_status:"Monthly status" };
+const SECTION_LABELS = { boarding_house:"Students per boarding house", barangay:"Students per barangay",
+  barangay_houses:"Boarding houses per barangay", gender:"Sex", department:"Department" };
 const COLORS = ["#2f5d4f","#c1502e","#d4a017","#5a8a3c","#6b6457","#203f36","#e07b39","#3c7a5c"];
 
-// The backend labels boarding-house rows as "Name (Barangay)" so the chart
-// axis/legend reads fine as one string - this splits it back apart for the
-// table, which shows Boarding House and Barangay as their own columns.
-function splitHouseLabel(label) {
-  const m = /^(.*) \(([^)]+)\)$/.exec(label);
-  return m ? { house: m[1], barangay: m[2] } : { house: label, barangay: "" };
-}
-
 export default function OsasReports() {
-  const [selected, setSelected] = useState(["boarding_house"]);
+  const [selected, setSelected] = useState(["boarding_house","barangay","barangay_houses","gender","department"]);
   const [monthLabel, setMonthLabel] = useState(new Date().toLocaleString("en-US", { 
   month: "long", 
   year: "numeric" 
@@ -240,10 +226,7 @@ async function downloadCharts() {
           <div>
             <div className="field" style={{minWidth:200}}>
               <label>Month</label>
-              <select value={monthLabel} onChange={e=>{setMonthLabel(e.target.value);setReport(null);}}>
-                <option value="">All months</option>
-                {MONTHS.filter(Boolean).map(m=><option key={m} value={m}>{m}</option>)}
-              </select>
+              <MonthFilterDropdown month={monthLabel} onChange={m => { setMonthLabel(m); setReport(null); }} />
             </div>
           </div>
         </div>
@@ -330,40 +313,25 @@ async function downloadCharts() {
                   </div>
                   {sec.rows.length === 0
                     ? <div className="review-empty">No data.</div>
-                    : (sec.rows.length <= 5 && sec.group_by !== "boarding_house")
+                    : sec.group_by === "gender"
                     ? <ResponsiveContainer width="100%" height={180}>
                         <PieChart>
-                          <Pie
-                            data={sec.rows}
-                            dataKey="count"
-                            nameKey="group_label"
-                            cx="40%"
-                            cy="50%"
-                            outerRadius={65}
-                            label={({ count }) => count}
-                            labelLine={false}
-                          >
-                            {sec.rows.map((_, i) => (
-                              <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                            ))}
+                          <Pie data={sec.rows} dataKey="count" nameKey="group_label" cx="40%" cy="50%"
+                            outerRadius={65} label={({ count }) => count} labelLine={false}>
+                            {sec.rows.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                           </Pie>
                           <Tooltip formatter={(value) => [`${value} Students`, "Total"]} />
-                          <Legend
-                            layout="vertical"
-                            align="right"
-                            verticalAlign="middle"
-                            iconType="circle"
+                          <Legend layout="vertical" align="right" verticalAlign="middle" iconType="circle"
                             wrapperStyle={{ fontSize: 12, lineHeight: "18px" }}
-                            formatter={(value, entry) => `${value} (${entry.payload.count})`}
-                          />
+                            formatter={(value, entry) => `${value} (${entry.payload.count})`} />
                         </PieChart>
                       </ResponsiveContainer>
                     : <ResponsiveContainer width="100%" height={Math.max(160, sec.rows.length * 42)}>
                         <BarChart data={sec.rows} layout="vertical" margin={{top:5,right:34,left:10,bottom:5}}>
                           <XAxis type="number" tick={{fontSize:10}} allowDecimals={false} />
-                          <YAxis type="category" dataKey="group_label" tick={{fontSize:10}} width={yAxisWidth} />
-                          <Tooltip formatter={(value) => [`${value} Students`, "Total"]} />
-                          <Bar dataKey="count" name="Students" fill="#2f5d4f" radius={[0,4,4,0]}>
+                          <YAxis type="category" dataKey="group_label" tick={{fontSize:10}} width={yAxisWidth} interval={0} />
+                          <Tooltip formatter={(value) => [value, sec.group_by === "barangay_houses" ? "Boarding houses" : "Students"]} />
+                          <Bar dataKey="count" name={sec.group_by === "barangay_houses" ? "Boarding houses" : "Students"} fill="#2f5d4f" radius={[0,4,4,0]}>
                             <LabelList dataKey="count" position="right" style={{ fontSize: 11, fontWeight: 700, fill: "#3a352b" }} />
                           </Bar>
                         </BarChart>
@@ -374,46 +342,35 @@ async function downloadCharts() {
             </div>
           )}
 
-          {/* Tables */}
+          {/* Tables - column order comes from the server (Student always first) */}
           {report.sections.map(sec => (
             <div className="card" key={sec.group_by} style={{marginBottom:18}}>
               <div className="panel-title">
-                {SECTION_LABELS[sec.group_by]||sec.group_by}
+                {sec.title || SECTION_LABELS[sec.group_by]||sec.group_by}
                 {report.month_label ? ` - ${report.month_label}` : " - All months"}
               </div>
+              <div style={{overflowX:"auto"}}>
               <table>
                 <tbody>
-                  {sec.group_by === "boarding_house" ? (
-                    <tr><th>Boarding house</th><th>Barangay</th><th>Count</th><th>Amenities</th><th>Students</th></tr>
-                  ) : (
-                    <tr><th>{SECTION_LABELS[sec.group_by]}</th><th>Count</th><th>Students</th></tr>
-                  )}
-                  {sec.rows.length===0
-                    ? <tr><td colSpan={sec.group_by==="boarding_house" ? 5 : 3} style={{color:"#a39c8a"}}>No data for this selection.</td></tr>
-                    : sec.rows.map(row => sec.group_by === "boarding_house" ? (
-                        (() => { const { house, barangay } = splitHouseLabel(row.group_label); return (
-                          <tr key={row.group_label}>
-                            <td style={{verticalAlign:"top"}}>{house}</td>
-                            <td style={{verticalAlign:"top"}}>{barangay}</td>
-                            <td style={{verticalAlign:"top"}}>{row.count}</td>
-                            <td style={{fontSize:12,color:"#544f43",maxWidth:220}}>{row.amenities||"-"}</td>
-                            <td style={{fontSize:12,color:"#544f43"}}>{row.student_names?.join(", ")||"-"}</td>
-                          </tr>
-                        ); })()
-                      ) : (
-                        <tr key={row.group_label}>
-                          <td style={{verticalAlign:"top"}}>{row.group_label}</td>
-                          <td style={{verticalAlign:"top"}}>{row.count}</td>
-                          <td style={{fontSize:12,color:"#544f43"}}>{row.student_names?.join(", ")||"-"}</td>
+                  <tr>{sec.columns.map(c => <th key={c}>{c}</th>)}</tr>
+                  {sec.table.length===0
+                    ? <tr><td colSpan={sec.columns.length} style={{color:"#a39c8a"}}>No data for this selection.</td></tr>
+                    : sec.table.map((r, i) => (
+                        <tr key={i} style={sec.bold_rows.includes(i) ? {background:"#f6f4ee"} : undefined}>
+                          {r.map((c, j) => (
+                            <td key={j} style={{verticalAlign:"top",whiteSpace:"pre-line",fontSize:12.5,
+                              fontWeight: sec.bold_rows.includes(i) ? 700 : 400}}>{c}</td>
+                          ))}
                         </tr>
                     ))}
-                  {sec.group_by === "boarding_house" ? (
-                    <tr><td style={{fontWeight:700}}>Total</td><td></td><td style={{fontWeight:700}}>{sec.total}</td><td></td><td></td></tr>
-                  ) : (
-                    <tr><td style={{fontWeight:700}}>Total</td><td style={{fontWeight:700}}>{sec.total}</td><td></td></tr>
-                  )}
+                  <tr>
+                    <td style={{fontWeight:700}}>{sec.total_label || "Total"}</td>
+                    <td style={{fontWeight:700}}>{sec.total}</td>
+                    {sec.columns.slice(2).map((_, k) => <td key={k}></td>)}
+                  </tr>
                 </tbody>
               </table>
+              </div>
             </div>
           ))}
 

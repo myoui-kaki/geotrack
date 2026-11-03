@@ -222,8 +222,9 @@ function EditUpdateForm({ update, onCancel, onSaved, onError }) {
 
 export default function StudentStatus() {
   const [statusType, setStatusType] = useState("same");
-  const [newBoardingHouseName, setNewBoardingHouseName] = useState("");
-  const [newBarangay, setNewBarangay] = useState("");
+  const EMPTY_HOUSE = { name: "", barangay: "", landlord: "", email: "", contact: "" };
+  const [house, setHouse] = useState(EMPTY_HOUSE);          // fields in the form
+  const [current, setCurrent] = useState(null);            // the house on file
   const [note, setNote] = useState("");
   const [amenities, setAmenities] = useState([]);
   const [photoDataUrl, setPhotoDataUrl] = useState(null);
@@ -238,7 +239,26 @@ export default function StudentStatus() {
 
   useEffect(() => {
     loadUpdates();
+    api.student.myProfile().then(p => {
+      if (p.current_boarding_house) {
+        const c = {
+          name: p.current_boarding_house || "", barangay: p.current_barangay || "",
+          landlord: p.landlord_name || "", email: p.landlord_email || "", contact: p.landlord_contact || "",
+        };
+        setCurrent(c); setHouse(c);
+      }
+    }).catch(() => {});
   }, []);
+
+  // Choosing "same" pre-fills what's on file (still required/editable);
+  // choosing "transferred" starts blank because it's a new place.
+  function chooseStatus(v) {
+    setStatusType(v);
+    setHouse(v === "same" && current ? current : EMPTY_HOUSE);
+    setAmenities([]); setPhotoDataUrl(null);
+  }
+  const houseComplete = Object.values(house).every(v => (v || "").trim());
+  const setH = k => e => setHouse({ ...house, [k]: e.target.value });
 
   async function loadUpdates() {
     setLoading(true);
@@ -255,7 +275,8 @@ export default function StudentStatus() {
   // Photo + amenities are required every month for "same" or
   // "transferred" - only "moved_home" skips them, since there's no
   // boarding house left to document.
-  const showDocumentation = statusType !== "moved_home";
+  const showHouseFields = statusType !== "moved_home";
+  const showDocumentation = showHouseFields && houseComplete;
   const hasSubmittedThisMonth = !loading && pastUpdates.some(u => u.month_label === CURRENT_MONTH);
 
   function toggleAmenity(name) {
@@ -277,6 +298,10 @@ export default function StudentStatus() {
     e.preventDefault();
     setError("");
     setSuccess("");
+    if (showHouseFields && !houseComplete) {
+      setError("Please fill in the boarding house name, barangay, landlord name, landlord email and contact number.");
+      return;
+    }
     if (showDocumentation && !photoDataUrl) {
       setError("A photo of your boarding house is required before this update can be submitted.");
       return;
@@ -286,7 +311,7 @@ export default function StudentStatus() {
       return;
     }
     const confirmMessage = statusType === "transferred"
-      ? `Submit this update for ${CURRENT_MONTH}? You're reporting a transfer to ${newBoardingHouseName || "a new boarding house"}.`
+      ? `Submit this update for ${CURRENT_MONTH}? You're reporting a transfer to ${house.name || "a new boarding house"}.`
       : statusType === "moved_home"
       ? `Submit this update for ${CURRENT_MONTH}? You're reporting that you've moved back home.`
       : `Submit this update for ${CURRENT_MONTH}? You're confirming you're still at the same boarding house.`;
@@ -296,8 +321,13 @@ export default function StudentStatus() {
     try {
       await api.student.submitStatusUpdate({
         status_type: statusType,
-        new_boarding_house_name: statusType === "transferred" ? newBoardingHouseName : null,
-        new_barangay: statusType === "transferred" ? newBarangay : null,
+        new_boarding_house_name: statusType === "transferred" ? house.name.trim() : null,
+        new_barangay: statusType === "transferred" ? house.barangay.trim() : null,
+        boarding_house_name: showHouseFields ? house.name.trim() : null,
+        boarding_house_barangay: showHouseFields ? house.barangay.trim() : null,
+        landlord_name: showHouseFields ? house.landlord.trim() : null,
+        landlord_email: showHouseFields ? house.email.trim() : null,
+        landlord_contact: showHouseFields ? house.contact.trim() : null,
         note: note || null,
         month_label: CURRENT_MONTH,
         photo_data_url: showDocumentation ? (photoDataUrl || null) : null,
@@ -305,8 +335,7 @@ export default function StudentStatus() {
       });
       setSuccess(`Update for ${CURRENT_MONTH} submitted.`);
       setNote("");
-      setNewBoardingHouseName("");
-      setNewBarangay("");
+      if (statusType !== "moved_home") setCurrent({ ...house });
       setAmenities([]);
       setPhotoDataUrl(null);
       loadUpdates();
@@ -331,13 +360,26 @@ export default function StudentStatus() {
     <>
       <div className="student-header">
         <div className="greet">Monthly check-in</div>
-        <h2>Status update</h2>
+        <h2>Boarding house information</h2>
       </div>
       <div className="student-body">
         {error && <div className="error-banner">{error}</div>}
         {success && (
           <div className="error-banner" style={{ background: "#e1f0e6", color: "var(--ok)" }}>
             {success}
+          </div>
+        )}
+
+        {current && (
+          <div className="card" style={{ marginBottom: 14 }}>
+            <div className="card-title">Your boarding house</div>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>{current.name}</div>
+            <div style={{ fontSize: 12.5, color: "#6b6457", marginBottom: 8 }}>{current.barangay}</div>
+            <div style={{ fontSize: 12.5, lineHeight: 1.7 }}>
+              <div><b>Landlord:</b> {current.landlord}</div>
+              <div><b>Email:</b> {current.email}</div>
+              <div><b>Contact number:</b> {current.contact}</div>
+            </div>
           </div>
         )}
 
@@ -357,7 +399,7 @@ export default function StudentStatus() {
             <MonthDropdown pastUpdates={pastUpdates} />
 
             <div className="field">
-              <select value={statusType} onChange={(e) => setStatusType(e.target.value)}>
+              <select value={statusType} onChange={(e) => chooseStatus(e.target.value)}>
                 <option value="same">Still at the same boarding house</option>
                 <option value="transferred">Transferred to a new boarding house</option>
                 <option value="moved_home">Moved back home / no longer off-campus</option>
@@ -367,26 +409,33 @@ export default function StudentStatus() {
             {/* These only appear when "transferred" is selected, exactly
                 like the static prototype, but now they're real form
                 fields wired into the request body. */}
-            {statusType === "transferred" && (
+            {showHouseFields && (
               <>
                 <div className="field">
-                  <label>New boarding house name</label>
-                  <input
-                    value={newBoardingHouseName}
-                    onChange={(e) => setNewBoardingHouseName(e.target.value)}
-                    placeholder="e.g. Green Haven Dorm"
-                    required
-                  />
+                  <label>Boarding house name *</label>
+                  <input value={house.name} onChange={setH("name")} placeholder="e.g. Green Haven Dorm" required />
                 </div>
                 <div className="field">
-                  <label>Barangay / address</label>
-                  <input
-                    value={newBarangay}
-                    onChange={(e) => setNewBarangay(e.target.value)}
-                    placeholder="e.g. Brgy. San Benito"
-                    required
-                  />
+                  <label>Barangay *</label>
+                  <input value={house.barangay} onChange={setH("barangay")} placeholder="e.g. Brgy. Del Remedio" required />
                 </div>
+                <div className="field">
+                  <label>Landlord name *</label>
+                  <input value={house.landlord} onChange={setH("landlord")} required />
+                </div>
+                <div className="field">
+                  <label>Landlord email *</label>
+                  <input type="email" value={house.email} onChange={setH("email")} required />
+                </div>
+                <div className="field">
+                  <label>Landlord contact number *</label>
+                  <input type="tel" value={house.contact} onChange={setH("contact")} required />
+                </div>
+                {!houseComplete && (
+                  <div style={{ fontSize: 12, color: "#8a6a1f", marginBottom: 12 }}>
+                    Fill in all the fields above to continue to the photo and amenities.
+                  </div>
+                )}
               </>
             )}
 
@@ -462,8 +511,8 @@ export default function StudentStatus() {
                   <div>
                     <div className="listing-name">{u.month_label}</div>
                     <div className="listing-meta">
-                      {u.status_type === "same" && "Same boarding house"}
-                      {u.status_type === "transferred" && `Transferred to ${u.new_boarding_house_name}`}
+                      {u.status_type === "same" && `Same boarding house${u.boarding_house_name ? ` - ${u.boarding_house_name}` : ""}`}
+                      {u.status_type === "transferred" && `Transferred to ${u.boarding_house_name || u.new_boarding_house_name}`}
                       {u.status_type === "moved_home" && "Moved back home"}
                     </div>
                   </div>

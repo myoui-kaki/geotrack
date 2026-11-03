@@ -62,10 +62,11 @@ export default function OsasLayout() {
         <div className="role-pill">OSAS administrator</div>
         <nav style={{marginTop:18}}>
           {[
-            ["/osas/dashboard",         "Geo-map overview"],
+            ["/osas/dashboard",         "Dashboard"],
+            ["/osas/geo-map",           "Geo-map overview"],
             ["/osas/status-updates",    "Student status monitor"],
             ["/osas/housing-oversight", "Housing oversight"],
-            ["/osas/concerns-alerts",   "Concerns & alerts"],
+            ["/osas/emergencies",       "Emergency / SOS cases"],
             ["/osas/reports",           "Reports"],
             ["/osas/accounts",          "Account management"],
           ].map(([to, label]) => (

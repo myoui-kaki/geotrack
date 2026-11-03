@@ -51,6 +51,11 @@ def _ensure_columns():
         insp = inspect(engine)
         cols = {c["name"] for c in insp.get_columns("boarding_houses")}
         stmts = []
+        if "contact_email" not in cols:
+            stmts.append("ALTER TABLE boarding_houses ADD COLUMN contact_email VARCHAR")
+        ucols = {c["name"] for c in insp.get_columns("users")}
+        if "department" not in ucols:
+            stmts.append("ALTER TABLE users ADD COLUMN department VARCHAR")
         if "rejected_at" not in cols:
             stmts.append("ALTER TABLE boarding_houses ADD COLUMN rejected_at TIMESTAMP")
         if "verification_remarks" not in cols:
@@ -190,51 +195,16 @@ def _check_photo(data_url):
     if not _ALLOWED_PHOTO.match(data_url):
         raise HTTPException(400, "Photo must be a PNG, JPEG or WebP image.")
 
-def auto_reject_overdue_houses(db: Session) -> int:
-    """Outside-coverage submissions not verified by OSAS within the 7-day
-    window are automatically set to Rejected (with remarks)."""
-    now = datetime.utcnow()
-    n = 0
-    rows = (db.query(models.BoardingHouse)
-              .filter(models.BoardingHouse.is_verified == False,
-                      models.BoardingHouse.rejected_at.is_(None)).all())
-    for h in rows:
-        due = h.verification_due
-        if due is None or due > now:
-            continue
-        h.is_verified = False
-        h.has_barangay_permit = False
-        h.rejected_at = now
-        h.verification_remarks = ("Auto-rejected: not verified by OSAS within 7 days of submission. "
-                                  "You may re-submit with complete details.")
-        n += 1
-        if h.submitted_by_id:
-            db.add(models.Notification(user_id=h.submitted_by_id, category="rejection",
-                   title="Boarding house rejected",
-                   message=f"{h.name} was automatically rejected because it was not verified within 7 days."))
-    if n:
-        db.commit()
-    return n
-
 def _scheduled_compliance_sweep():
     """Runs on its own DB session since it's not triggered by a request."""
     db = SessionLocal()
     try:
         run_compliance_automation(db, actor=None)
-        auto_reject_overdue_houses(db)
     finally:
         db.close()
 
 scheduler = BackgroundScheduler(timezone="UTC")
 scheduler.add_job(_scheduled_compliance_sweep, "cron", hour=0, minute=10, id="compliance_daily_sweep")
-
-def _scheduled_auto_reject():
-    db = SessionLocal()
-    try:
-        auto_reject_overdue_houses(db)
-    finally:
-        db.close()
-scheduler.add_job(_scheduled_auto_reject, "interval", hours=1, id="auto_reject_overdue")
 
 @app.on_event("startup")
 def _start_scheduler():
@@ -385,6 +355,7 @@ def register_student(payload: schemas.RegisterStudentRequest, db: Session = Depe
         full_name=payload.full_name, email=payload.email,
         hashed_password=hash_password(payload.password),
         role="student", course_section=payload.course_section, gender=payload.gender,
+        department=payload.department,
         is_email_verified=False,
         email_otp=otp, email_otp_expires=datetime.utcnow() + timedelta(minutes=15),
     )
@@ -400,14 +371,14 @@ def register_student(payload: schemas.RegisterStudentRequest, db: Session = Depe
                 latitude=payload.boarding_house_latitude, longitude=payload.boarding_house_longitude,
                 is_verified=False, submitted_by=f"Student — {user.full_name}",
                 submitted_by_id=user.id, contact_person=payload.landlord_name,
-                contact_number=payload.landlord_contact)
+                contact_number=payload.landlord_contact, contact_email=str(payload.landlord_email))
             db.add(house); db.commit(); db.refresh(house)
         else:
             # Re-submission of a house this same student had rejected: reopen it
-            # as Unverified with a fresh 7-day window.
+            # as Unverified.
             if house.rejected_at is not None and house.submitted_by_id == user.id:
                 house.rejected_at = None; house.is_verified = False
-                house.verification_remarks = None; house.created_at = datetime.utcnow()
+                house.verification_remarks = None
             # Auto-fill landlord info this student provided if the existing
             # record is missing it - OSAS shouldn't have to chase down
             # contact details separately when a student already has them.
@@ -416,6 +387,8 @@ def register_student(payload: schemas.RegisterStudentRequest, db: Session = Depe
                 house.contact_person = payload.landlord_name; updated = True
             if payload.landlord_contact and not house.contact_number:
                 house.contact_number = payload.landlord_contact; updated = True
+            if payload.landlord_email and not house.contact_email:
+                house.contact_email = str(payload.landlord_email); updated = True
             if updated:
                 db.commit()
         db.add(models.StatusUpdate(student_id=user.id, boarding_house_id=house.id,
@@ -628,6 +601,8 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         db.commit()
         raise HTTPException(401, generic)
 
+    if user.archived_at is not None:
+        raise HTTPException(403, "This account has been archived. Please contact OSAS.")
     user.failed_login_attempts = 0; user.locked_until = None; db.commit()
 
     # 2FA check
@@ -730,25 +705,42 @@ def reset_password(payload: schemas.ResetPasswordRequest, db: Session = Depends(
 
 
 # ─── STUDENT endpoints ────────────────────────────────────────────────────────
+def _student_current_house(db, student_id: int):
+    """The BoardingHouse row a student currently boards at (latest update
+    that points at one), or None if they have none / moved home."""
+    updates = (db.query(models.StatusUpdate)
+                 .filter(models.StatusUpdate.student_id == student_id)
+                 .order_by(models.StatusUpdate.created_at.desc(), models.StatusUpdate.id.desc())
+                 .all())
+    for u in updates:
+        if u.status_type == "moved_home":
+            return None
+        if u.boarding_house is not None:
+            return u.boarding_house
+    return None
+
+
 @app.get("/api/student/me", response_model=schemas.MyProfileOut)
 def my_profile(db: Session = Depends(get_db), user: models.User = Depends(require_student)):
     latest = (db.query(models.StatusUpdate)
                 .filter(models.StatusUpdate.student_id == user.id)
                 .order_by(models.StatusUpdate.created_at.desc())
                 .first())
-    boarding_house_name = current_barangay = landlord_name = landlord_contact = None
-    if latest:
-        if latest.status_type == "transferred":
-            boarding_house_name = latest.new_boarding_house_name
-            current_barangay = latest.new_barangay
-        elif latest.boarding_house:
-            boarding_house_name = latest.boarding_house.name
-            current_barangay = latest.boarding_house.barangay
-            landlord_name = latest.boarding_house.contact_person
-            landlord_contact = latest.boarding_house.contact_number
+    boarding_house_name = current_barangay = landlord_name = landlord_contact = landlord_email = None
+    house = _student_current_house(db, user.id)
+    if house is not None:
+        boarding_house_name = house.name
+        current_barangay = house.barangay
+        landlord_name = house.contact_person
+        landlord_contact = house.contact_number
+        landlord_email = house.contact_email
+    elif latest and latest.status_type == "transferred":
+        boarding_house_name = latest.new_boarding_house_name
+        current_barangay = latest.new_barangay
     return schemas.MyProfileOut(
         id=user.id, full_name=user.full_name, email=user.email,
-        course_section=user.course_section, gender=user.gender,
+        course_section=user.course_section, gender=user.gender, department=user.department,
+        landlord_email=landlord_email,
         created_at=user.created_at, two_fa_enabled=user.two_fa_enabled,
         current_boarding_house=boarding_house_name, current_barangay=current_barangay,
         landlord_name=landlord_name, landlord_contact=landlord_contact,
@@ -758,18 +750,25 @@ def my_profile(db: Session = Depends(get_db), user: models.User = Depends(requir
 def update_profile(payload: schemas.MyProfileUpdate, db: Session = Depends(get_db),
                    user: models.User = Depends(require_student)):
     old_name = user.full_name
-    for f, v in payload.dict(exclude_unset=True).items(): setattr(user, f, v)
+    # Profile details are set once at sign-up and are read-only afterwards.
+    # Only a field that is still empty (e.g. an account created with Google)
+    # can be filled in here; an existing value is never overwritten.
+    for f, v in payload.dict(exclude_unset=True).items():
+        if v in (None, ""):
+            continue
+        if getattr(user, f, None):
+            continue
+        setattr(user, f, v)
     db.commit(); db.refresh(user)
     log_action(db, user, "update", "user", user.id, user.full_name,
                f"Profile updated (was: {old_name})" if old_name != user.full_name else "Profile updated")
-    return user
+    return my_profile(db, user)
 
 @app.get("/api/student/boarding-houses", response_model=List[schemas.BoardingHouseOut])
 def student_list_bh(db: Session = Depends(get_db), user: models.User = Depends(require_student)):
     # Rejected houses are only visible to the student who submitted them
     # (so they can read the remarks); everyone else just sees the rest.
     from sqlalchemy import or_
-    auto_reject_overdue_houses(db)
     return (db.query(models.BoardingHouse)
               .filter(or_(models.BoardingHouse.rejected_at.is_(None),
                           models.BoardingHouse.submitted_by_id == user.id))
@@ -818,17 +817,60 @@ def delete_review(rid: int, db: Session = Depends(get_db), user: models.User = D
     log_action(db, user, "delete", "review", rid, None, "Review deleted")
     return {"message": "Deleted"}
 
+def _upsert_student_house(db, user, status_type, name, barangay, landlord, email, contact):
+    """Find (by name + barangay) or create the boarding house a student
+    reports, and keep its landlord details current."""
+    house = None
+    if status_type == "same":
+        house = _student_current_house(db, user.id)
+        if house is not None and (house.name.strip().lower() != name.lower()
+                                  or _norm_brgy(house.barangay) != _norm_brgy(barangay)):
+            house = None   # they typed a different house - treat it like any other
+    if house is None:
+        for h in db.query(models.BoardingHouse).filter(models.BoardingHouse.name.ilike(name)).all():
+            if _norm_brgy(h.barangay) == _norm_brgy(barangay):
+                house = h
+                break
+    if house is None:
+        house = models.BoardingHouse(
+            name=name, barangay=barangay, is_verified=False,
+            submitted_by=f"Student - {user.full_name}", submitted_by_id=user.id)
+        db.add(house)
+    elif house.rejected_at is not None and house.submitted_by_id == user.id:
+        house.rejected_at = None; house.is_verified = False; house.verification_remarks = None
+    house.contact_person = landlord
+    house.contact_email = email
+    house.contact_number = contact
+    db.flush()
+    return house
+
+
 @app.post("/api/student/status-updates", response_model=schemas.StatusUpdateOut)
 def submit_status(
     payload: schemas.StatusUpdateCreate,
     db: Session = Depends(get_db),
     user: models.User = Depends(require_student)
 ):
-    if payload.status_type == "transferred" and not payload.new_boarding_house_name:
-        raise HTTPException(
-            status_code=400,
-            detail="new_boarding_house_name required when transferred"
-        )
+    house = None
+    if payload.status_type in ("same", "transferred"):
+        # Boarding house + landlord details are required before anything else.
+        required = {
+            "Boarding house name": payload.boarding_house_name or payload.new_boarding_house_name,
+            "Barangay": payload.boarding_house_barangay or payload.new_barangay,
+            "Landlord name": payload.landlord_name,
+            "Landlord email": payload.landlord_email,
+            "Landlord contact number": payload.landlord_contact,
+        }
+        missing = [k for k, v in required.items() if not (v or "").strip()]
+        if missing:
+            raise HTTPException(400, "Please fill in: " + ", ".join(missing) + ".")
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", payload.landlord_email.strip()):
+            raise HTTPException(400, "Please enter a valid landlord email address.")
+        bh_name = required["Boarding house name"].strip()
+        bh_brgy = required["Barangay"].strip()
+        house = _upsert_student_house(db, user, payload.status_type, bh_name, bh_brgy,
+                                      payload.landlord_name.strip(), payload.landlord_email.strip(),
+                                      payload.landlord_contact.strip())
 
     # A photo and amenities checklist of the boarding house are required
     # every month the student is still reporting a boarding house ("same"
@@ -894,10 +936,10 @@ def submit_status(
 
     update = models.StatusUpdate(
         student_id=user.id,
-        boarding_house_id=payload.boarding_house_id,
+        boarding_house_id=house.id if house is not None else payload.boarding_house_id,
         status_type=payload.status_type,
-        new_boarding_house_name=payload.new_boarding_house_name,
-        new_barangay=payload.new_barangay,
+        new_boarding_house_name=(house.name if (house is not None and payload.status_type == "transferred") else payload.new_boarding_house_name),
+        new_barangay=(house.barangay if (house is not None and payload.status_type == "transferred") else payload.new_barangay),
         note=payload.note,
         month_label=f"{current_month} {current_year}",
         photo_data_url=payload.photo_data_url,
@@ -976,11 +1018,7 @@ def my_concerns(db: Session = Depends(get_db), user: models.User = Depends(requi
 
 @app.get("/api/student/my-boarding-house", response_model=Optional[schemas.BoardingHouseOut])
 def my_boarding_house(db: Session = Depends(get_db), user: models.User = Depends(require_student)):
-    u = (db.query(models.StatusUpdate)
-         .filter(models.StatusUpdate.student_id == user.id,
-                 models.StatusUpdate.boarding_house_id.isnot(None))
-         .order_by(models.StatusUpdate.created_at.desc()).first())
-    return u.boarding_house if u else None
+    return _student_current_house(db, user.id)
 
 
 # ─── Cross-portal contact directory ───────────────────────────────────────────
@@ -1111,13 +1149,14 @@ def dashboard(db: Session = Depends(get_db), user: models.User = Depends(require
     check_monthly_compliance(db)
 
     # Charts data
-    gender_counts: dict = {}
-    dept_counts:   dict = {}
-    for s in students:
-        g = (s.gender or "not_specified").replace("_", " ").title()
-        gender_counts[g] = gender_counts.get(g, 0) + 1
-        d = s.course_section or "Not specified"
-        dept_counts[d] = dept_counts.get(d, 0) + 1
+    students = [s_ for s_ in students if s_.archived_at is None]
+    gender_counts: dict = {k: 0 for k in SEX_LABELS}
+    dept_counts:   dict = {k: 0 for k in DEPARTMENTS}
+    for s_ in students:
+        g = _sex_label(s_.gender)
+        if g: gender_counts[g] += 1
+        d = get_department(s_.course_section, s_.department)
+        if d: dept_counts[d] += 1
 
     bar_counts: dict = {}
     status_counts: dict = {}
@@ -1142,7 +1181,7 @@ def dashboard(db: Session = Depends(get_db), user: models.User = Depends(require
         pending_verifications=db.query(models.BoardingHouse).filter(models.BoardingHouse.is_verified==False, models.BoardingHouse.rejected_at.is_(None)).count(),
         active_emergencies=db.query(models.EmergencyCase).filter(models.EmergencyCase.status.in_(["Active","Responding"])).count(),
         by_gender=[{"label":k,"count":v} for k,v in sorted(gender_counts.items())],
-        by_department=[{"label":k,"count":v} for k,v in sorted(dept_counts.items())],
+        by_department=[{"label":k,"count":dept_counts[k]} for k in DEPARTMENTS],
         by_barangay=[{"label":k,"count":v} for k,v in sorted(bar_counts.items())],
         by_status=[{"label":k,"count":v} for k,v in sorted(status_counts.items())],
         recent_activities=activities,
@@ -1249,6 +1288,7 @@ def all_status_updates(
             note=u.note, month_label=u.month_label, is_flagged=u.is_flagged,
             flag_reason=u.flag_reason, created_at=u.created_at,
             photo_data_url=u.photo_data_url, amenities_checklist=u.amenities_checklist,
+            boarding_house_name=u.boarding_house_name, boarding_house_barangay=u.boarding_house_barangay,
             student_name=u.student.full_name, student_email=u.student.email,
         ))
     return results
@@ -1286,7 +1326,6 @@ def flag_update(
 
 @app.get("/api/osas/boarding-houses", response_model=List[schemas.BoardingHouseOut])
 def list_bh(db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
-    auto_reject_overdue_houses(db)
     return db.query(models.BoardingHouse).all()
 
 @app.patch("/api/osas/boarding-houses/{hid}/verify", response_model=schemas.BoardingHouseOut)
@@ -1332,23 +1371,6 @@ def reject_bh(hid: int, payload: schemas.BoardingHouseReject, db: Session = Depe
                f"Your submission for \"{h.name}\" was rejected. Reason: {reason}")
     return h
 
-@app.post("/api/osas/boarding-houses/{hid}/unverify", response_model=schemas.BoardingHouseOut)
-def unverify_bh(hid: int, payload: schemas.BoardingHouseReject, db: Session = Depends(get_db),
-                user: models.User = Depends(require_osas_admin)):
-    h = db.query(models.BoardingHouse).get(hid)
-    if not h: raise HTTPException(404, "Not found")
-    reason = _require_reason(payload.reason)
-    h.is_verified = False
-    h.has_barangay_permit = False
-    h.rejected_at = None
-    h.verification_remarks = reason
-    db.commit(); db.refresh(h)
-    log_action(db, user, "update", "boarding_house", hid, h.name, f"Verification removed: {reason}")
-    if h.submitter:
-        notify(db, h.submitter.id, "rejection", "Boarding house unverified",
-               f"\"{h.name}\" is no longer verified. Reason: {reason}")
-    return h
-
 @app.put("/api/osas/boarding-houses/{hid}", response_model=schemas.BoardingHouseOut)
 def update_bh(hid: int, payload: schemas.BoardingHouseUpdate, db: Session = Depends(get_db),
               user: models.User = Depends(require_osas_admin)):
@@ -1380,8 +1402,18 @@ def barangay_profile(user: models.User = Depends(require_barangay)):
 @app.patch("/api/barangay/me", response_model=schemas.BarangayProfileOut)
 def barangay_update_profile(payload: schemas.BarangayProfileUpdate, db: Session = Depends(get_db),
                              user: models.User = Depends(require_barangay)):
-    for f, v in payload.dict(exclude_unset=True).items(): setattr(user, f, v)
+    data = payload.dict(exclude_unset=True)
+    if "email" in data:
+        new_email = (data.pop("email") or "").strip().lower()
+        if new_email and new_email != (user.email or "").lower():
+            if db.query(models.User).filter(models.User.email == new_email, models.User.id != user.id).first():
+                raise HTTPException(400, "That email is already used by another account.")
+            user.email = new_email
+    if "full_name" in data and not (data["full_name"] or "").strip():
+        raise HTTPException(400, "Full name can't be empty.")
+    for f, v in data.items(): setattr(user, f, v)
     db.commit(); db.refresh(user)
+    log_action(db, user, "update", "user", user.id, user.full_name, "Barangay profile updated")
     return user
 
 @app.get("/api/barangay/boarding-houses", response_model=List[schemas.BoardingHouseOut])
@@ -1406,16 +1438,19 @@ def barangay_confirm_permit(hid: int, payload: schemas.BarangayPermitUpdate,
         h.rejected_at = None
         h.verification_remarks = None
     else:
-        h.verification_remarks = "The barangay could not confirm a valid business permit."
+        # "Without permit" = the barangay found no valid business permit, so
+        # the house is Rejected, with the reason shown to the student + OSAS.
+        h.rejected_at = datetime.utcnow()
+        h.verification_remarks = f"Without permit: {user.barangay_name} could not confirm a valid business permit."
     db.commit(); db.refresh(h)
     log_action(db, user, "verify" if payload.has_barangay_permit else "reject", "boarding_house", hid, h.name,
-               "Barangay confirmed business permit" if payload.has_barangay_permit else "Barangay could not confirm a valid permit")
+               "Barangay confirmed business permit (with permit)" if payload.has_barangay_permit else "Barangay marked the boarding house as without permit")
     if h.submitter:
         if payload.has_barangay_permit:
             notify(db, h.submitter.id, "approval", "Boarding house verified",
                    f"{user.barangay_name} confirmed a valid permit for \"{h.name}\".")
         else:
-            notify(db, h.submitter.id, "rejection", "Boarding house not verified",
+            notify(db, h.submitter.id, "rejection", "Boarding house rejected - without permit",
                    f"{user.barangay_name} could not confirm a valid permit for \"{h.name}\".")
     return h
 
@@ -1572,7 +1607,80 @@ def add_emergency_note(case_id: int, payload: schemas.EmergencyNoteCreate,
 
 @app.get("/api/osas/accounts", response_model=List[schemas.OsasAccountOut])
 def list_osas_accounts(db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
-    return db.query(models.User).filter(models.User.role == "osas_admin").all()
+    return (db.query(models.User)
+              .filter(models.User.role == "osas_admin", models.User.archived_at.is_(None))
+              .order_by(models.User.full_name).all())
+
+@app.get("/api/osas/barangay-accounts", response_model=List[schemas.BarangayAccountOut])
+def list_barangay_accounts(db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
+    return (db.query(models.User)
+              .filter(models.User.role == "barangay", models.User.archived_at.is_(None))
+              .order_by(models.User.barangay_name, models.User.full_name).all())
+
+@app.get("/api/osas/archived-accounts", response_model=List[schemas.ArchivedAccountOut])
+def list_archived_accounts(role: Optional[str] = None, db: Session = Depends(get_db),
+                           user: models.User = Depends(require_osas_admin)):
+    q = db.query(models.User).filter(models.User.archived_at.isnot(None))
+    if role:
+        q = q.filter(models.User.role == role)
+    return [schemas.ArchivedAccountOut(
+                id=u.id, role=u.role, full_name=u.full_name, email=u.email, position=u.position,
+                contact_number=u.contact_number, barangay_name=u.barangay_name,
+                course_section=u.course_section, department=u.department, archived_at=u.archived_at)
+            for u in q.order_by(models.User.archived_at.desc()).all()]
+
+@app.get("/api/osas/accounts/{uid}/history")
+def account_history(uid: int, limit: int = 100, db: Session = Depends(get_db),
+                    user: models.User = Depends(require_osas_admin)):
+    """What an account (any role) has done, from the audit log, plus what
+    was done TO it (e.g. who archived it and when)."""
+    target = db.query(models.User).get(uid)
+    if not target: raise HTTPException(404, "Not found")
+    by = (db.query(models.AuditLog).filter(models.AuditLog.actor_id == uid)
+            .order_by(models.AuditLog.created_at.desc()).limit(limit).all())
+    on = (db.query(models.AuditLog)
+            .filter(models.AuditLog.resource_id == uid,
+                    models.AuditLog.resource_type.in_(["osas_account", "student", "barangay_account", "user"]),
+                    models.AuditLog.action.in_(["archive", "unarchive"]))
+            .order_by(models.AuditLog.created_at.desc()).all())
+    rows = {l.id: l for l in by + on}
+    ordered = sorted(rows.values(), key=lambda l: l.created_at, reverse=True)
+    return {
+        "account": {"id": target.id, "role": target.role, "full_name": target.full_name,
+                    "email": target.email, "position": target.position,
+                    "contact_number": target.contact_number, "barangay_name": target.barangay_name,
+                    "course_section": target.course_section, "department": target.department,
+                    "created_at": target.created_at, "archived_at": target.archived_at},
+        "history": [{"id": l.id, "action": l.action, "resource_type": l.resource_type,
+                     "resource_label": l.resource_label, "detail": l.detail,
+                     "actor_name": l.actor_name, "created_at": l.created_at} for l in ordered],
+    }
+
+def _set_archived(db, actor, target_id: int, role: str, archive: bool, rtype: str):
+    t = db.query(models.User).filter(models.User.id == target_id, models.User.role == role).first()
+    if not t: raise HTTPException(404, "Not found")
+    if archive and t.id == actor.id: raise HTTPException(400, "You can't archive your own account.")
+    t.archived_at = datetime.utcnow() if archive else None
+    db.commit()
+    log_action(db, actor, "archive" if archive else "unarchive", rtype, t.id, t.full_name,
+               f"{role.replace('_', ' ').title()} account {'archived' if archive else 'restored'}")
+    return {"message": "Archived" if archive else "Restored"}
+
+@app.patch("/api/osas/accounts/{aid}/archive")
+def archive_osas_account(aid: int, db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
+    return _set_archived(db, user, aid, "osas_admin", True, "osas_account")
+
+@app.patch("/api/osas/accounts/{aid}/unarchive")
+def unarchive_osas_account(aid: int, db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
+    return _set_archived(db, user, aid, "osas_admin", False, "osas_account")
+
+@app.patch("/api/osas/barangay-accounts/{bid}/archive")
+def archive_barangay_account(bid: int, db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
+    return _set_archived(db, user, bid, "barangay", True, "barangay_account")
+
+@app.patch("/api/osas/barangay-accounts/{bid}/unarchive")
+def unarchive_barangay_account(bid: int, db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
+    return _set_archived(db, user, bid, "barangay", False, "barangay_account")
 
 @app.put("/api/osas/accounts/{aid}", response_model=schemas.OsasAccountOut)
 def update_osas_account(aid: int, payload: schemas.OsasAccountUpdate,
@@ -1598,21 +1706,6 @@ def _purge_user_refs(db: Session, u: models.User):
         db.delete(c)
     db.flush()
 
-@app.delete("/api/osas/accounts/{aid}")
-def delete_osas_account(aid: int, db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
-    if aid == user.id: raise HTTPException(400, "Cannot delete your own account.")
-    a = db.query(models.User).filter(models.User.id == aid, models.User.role == "osas_admin").first()
-    if not a: raise HTTPException(404, "Not found")
-    label = a.full_name
-    try:
-        _purge_user_refs(db, a)
-        db.delete(a); db.commit()
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(500, f"Could not delete account: {e.__class__.__name__}")
-    log_action(db, user, "delete", "osas_account", aid, label, "OSAS account deleted")
-    return {"message": "Deleted"}
-
 @app.get("/api/osas/students", response_model=List[schemas.StudentAccountOut])
 def list_students(
     search: Optional[str] = None,
@@ -1631,7 +1724,7 @@ def list_students(
         if course_section and (s.course_section or "").lower() != course_section.lower(): continue
         results.append(schemas.StudentAccountOut(
             id=s.id, full_name=s.full_name, email=s.email,
-            course_section=s.course_section, gender=s.gender, created_at=s.created_at,
+            course_section=s.course_section, gender=s.gender, department=s.department, created_at=s.created_at,
             is_archived=s.archived_at is not None, archived_at=s.archived_at,
         ))
     return results
@@ -1744,78 +1837,171 @@ def _same_barangay(a: Optional[str], b: Optional[str]) -> bool:
     return bool(a) and bool(b) and _norm_brgy(a) == _norm_brgy(b)
 
 # Course code (the letters at the start of course_section, e.g. "BSIT-3A" -> "BSIT")
-# to college/department. Add or edit entries here as needed for your campus.
+# to college/department - only used as a fallback for older accounts that
+# were created before Department became a required sign-up field.
+DEPARTMENTS = ["CCS", "COE", "CTE", "CBAA", "CIT", "CCJE", "CAS", "CHMT"]
+SEX_LABELS = ["Male", "Female"]
 COURSE_TO_DEPARTMENT = {
     "BSIT": "CCS", "BSCS": "CCS", "BLIS": "CCS",
     "BSCE": "COE", "BSEE": "COE", "BSME": "COE", "BSABE": "COE",
     "BEED": "CTE", "BSED": "CTE", "BPED": "CTE", "BTLED": "CTE", "BECED": "CTE",
-    "BSBA": "CBA", "BSAIS": "CBA", "BSREM": "CBA", "BSA": "CBA",
-    "BSHM": "CHTM", "BSTM": "CHTM",
+    "BSBA": "CBAA", "BSAIS": "CBAA", "BSREM": "CBAA", "BSA": "CBAA",
+    "BSHM": "CHMT", "BSTM": "CHMT",
     "BSCRIM": "CCJE",
     "BAB": "CAS", "BSP": "CAS",
+    "BIT": "CIT", "BSINDTECH": "CIT", "BSIE": "CIT", "BTVTED": "CIT",
 }
 
-def get_department(course_section: Optional[str]) -> str:
+def get_department(course_section: Optional[str], department: Optional[str] = None) -> Optional[str]:
+    """The student's department, or None when it isn't known."""
+    if department and department.upper() in DEPARTMENTS:
+        return department.upper()
     if not course_section:
-        return "Not specified"
+        return None
     m = re.match(r"[A-Za-z]+", course_section.strip())
     code = m.group(0).upper() if m else ""
-    return COURSE_TO_DEPARTMENT.get(code, "Other / Unmapped")
+    return COURSE_TO_DEPARTMENT.get(code)
+
+def _sex_label(g: Optional[str]) -> Optional[str]:
+    g = (g or "").lower()
+    return "Male" if g == "male" else "Female" if g == "female" else None
+
+def _month_end(month_label: Optional[str]):
+    """First instant AFTER the selected month, or None for 'all months'."""
+    if not month_label:
+        return None
+    try:
+        d = datetime.strptime(month_label.strip(), "%B %Y")
+    except ValueError:
+        return None
+    return datetime(d.year + (d.month == 12), (d.month % 12) + 1, 1)
 
 def _compute_tally(db, group_by_list, month_label):
-    valid = {"barangay","boarding_house","gender","department","section","monthly_status"}
-    def compute_section(g):
-        groups: dict = {}
-        amenities_by_label: dict = {}
-        if g in ("gender","department","section"):
-            for s in db.query(models.User).filter(models.User.role=="student").all():
-                if g == "gender":
-                    label = (s.gender or "Not specified").replace("_"," ").title()
-                elif g == "department":
-                    label = get_department(s.course_section)
-                else:  # section - the full course & section string, e.g. "BSIT-3A"
-                    label = s.course_section or "Not specified"
-                groups.setdefault(label,[]).append(s.full_name)
-        elif g == "monthly_status":
-            # This one genuinely is "what did each student report this
-            # specific month" - the month filter makes sense here.
-            q = db.query(models.StatusUpdate)
-            if month_label: q = q.filter(models.StatusUpdate.month_label==month_label)
-            for u in q.all():
-                nm = u.student.full_name if u.student else "Unknown"
-                label = {"same":"Same boarding house","transferred":"Transferred","moved_home":"Moved home"}.get(u.status_type,u.status_type)
-                groups.setdefault(label,[]).append(nm)
-        else:
-            # barangay / boarding_house - this is "where is each student
-            # currently living", so use each student's most recent status
-            # update ever, not just ones filed in the selected month. A
-            # student who hasn't had anything change since August is still
-            # living somewhere in September - filtering strictly by month
-            # here would make the report go empty for any month nobody
-            # happened to submit a fresh update in.
-            latest_by_student = {}
-            for u in (db.query(models.StatusUpdate)
-                        .order_by(models.StatusUpdate.created_at.asc(), models.StatusUpdate.id.asc())
-                        .all()):
-                latest_by_student[u.student_id] = u  # later rows overwrite earlier ones
-            for u in latest_by_student.values():
-                nm = u.student.full_name if u.student else "Unknown"
-                if u.status_type=="transferred": hn,bar = u.new_boarding_house_name or "Unknown",u.new_barangay or "Unknown"
-                elif u.boarding_house: hn,bar = u.boarding_house.name,u.boarding_house.barangay
-                else: continue
-                if g=="barangay": label = bar
-                else: label = f"{hn} ({bar})" if bar and bar != "Unknown" else hn
-                groups.setdefault(label,[]).append(nm)
-                if g=="boarding_house" and u.amenities_checklist:
-                    amenities_by_label.setdefault(label,set()).update(
-                        a.strip() for a in u.amenities_checklist.split(",") if a.strip())
-        rows = [schemas.TallyReportRow(
-                    group_label=k, count=len(v), student_names=sorted(v),
-                    amenities=", ".join(sorted(amenities_by_label[k])) if amenities_by_label.get(k) else None,
-                ) for k,v in sorted(groups.items())]
-        return schemas.TallyReportSection(group_by=g,rows=rows,total=sum(len(v) for v in groups.values()))
-    sections = [compute_section(g) for g in group_by_list if g in valid]
-    return sections
+    valid = {"barangay", "boarding_house", "barangay_houses", "gender", "department", "section", "monthly_status"}
+    end = _month_end(month_label)
+
+    students = [st for st in db.query(models.User).filter(models.User.role == "student").all()
+                if st.archived_at is None and (end is None or st.created_at is None or st.created_at < end)]
+    by_id = {st.id: st for st in students}
+
+    # Where each student is boarding AS OF the selected month: their latest
+    # update up to the end of that month (so an update filed in the selected
+    # month is always read, and an older one carries forward if nothing new
+    # was filed). No month selected = latest update overall.
+    latest = {}
+    q = db.query(models.StatusUpdate).order_by(models.StatusUpdate.created_at.asc(), models.StatusUpdate.id.asc())
+    for u in q.all():
+        if end is not None and u.created_at is not None and u.created_at >= end:
+            continue
+        latest[u.student_id] = u
+    located = []   # (student, house_name, barangay, amenities)
+    for sid, u in latest.items():
+        st = by_id.get(sid)
+        if st is None or u.status_type == "moved_home":
+            continue
+        hn, bar = u.boarding_house_name, u.boarding_house_barangay
+        if not hn:
+            continue
+        located.append((st, hn, bar or "Unknown",
+                        ", ".join(sorted(a.strip() for a in (u.amenities_checklist or "").split(",") if a.strip()))))
+
+    def section(g, title, columns, table, rows, total, bold_rows=None, total_label="Total"):
+        return schemas.TallyReportSection(group_by=g, title=title, columns=columns, table=table,
+                                          bold_rows=bold_rows or [], rows=rows, total=total, total_label=total_label)
+
+    def compute(g):
+        if g == "boarding_house":
+            groups = {}
+            for st, hn, bar, am in located:
+                groups.setdefault((hn, bar), []).append((st.full_name, am))
+            keys = sorted(groups, key=lambda k: (k[1].lower(), k[0].lower()))
+            table, rows = [], []
+            for hn, bar in keys:
+                names = sorted(n for n, _ in groups[(hn, bar)])
+                am = ", ".join(sorted({x.strip() for _, a in groups[(hn, bar)] for x in a.split(",") if x.strip()}))
+                table.append(["\n".join(names), hn, bar, am, str(len(names))])
+                rows.append(schemas.TallyReportRow(group_label=f"{hn} ({bar})" if bar != "Unknown" else hn,
+                                                   count=len(names), student_names=names, amenities=am or None))
+            return section(g, "Students per boarding house",
+                           ["Student(s)", "Boarding house", "Barangay", "Amenities", "No. of students"],
+                           table, rows, sum(r.count for r in rows), total_label="Total students")
+        if g == "barangay":
+            groups = {}
+            for st, hn, bar, am in located:
+                groups.setdefault(bar, []).append((st.full_name, hn, am))
+            table, rows, bold = [], [], []
+            for bar in sorted(groups, key=str.lower):
+                for nm, hn, am in sorted(groups[bar], key=lambda x: x[0].lower()):
+                    table.append([nm, hn, bar, am, ""])
+                table.append([f"Total - {bar}", "", "", "", str(len(groups[bar]))])
+                bold.append(len(table) - 1)
+                rows.append(schemas.TallyReportRow(group_label=bar, count=len(groups[bar]),
+                                                   student_names=sorted(x[0] for x in groups[bar])))
+            return section(g, "Students per barangay (with boarding house and amenities)",
+                           ["Student", "Boarding house", "Barangay", "Amenities", "Total"],
+                           table, rows, sum(r.count for r in rows), bold, "Total students")
+        if g == "barangay_houses":
+            groups = {}
+            for h in db.query(models.BoardingHouse).all():
+                if h.rejected_at is not None:
+                    continue
+                if end is not None and h.created_at is not None and h.created_at >= end:
+                    continue
+                groups.setdefault(h.barangay or "Unknown", []).append(h.name)
+            table, rows = [], []
+            for bar in sorted(groups, key=str.lower):
+                names = sorted(groups[bar], key=str.lower)
+                table.append([bar, "\n".join(names), str(len(names))])
+                rows.append(schemas.TallyReportRow(group_label=bar, count=len(names), student_names=names))
+            return section(g, "Boarding houses per barangay",
+                           ["Barangay", "Boarding houses", "No. of boarding houses"],
+                           table, rows, sum(r.count for r in rows), total_label="Total boarding houses")
+        if g == "gender":
+            groups = {k: [] for k in SEX_LABELS}
+            noinfo = []
+            for st in students:
+                lab = _sex_label(st.gender)
+                (groups[lab] if lab else noinfo).append(st.full_name)
+            table = [[nm, lab] for lab in SEX_LABELS for nm in sorted(groups[lab], key=str.lower)]
+            table += [[nm, "-"] for nm in sorted(noinfo, key=str.lower)]
+            rows = [schemas.TallyReportRow(group_label=lab, count=len(groups[lab]),
+                                           student_names=sorted(groups[lab])) for lab in SEX_LABELS]
+            return section(g, "Students by sex", ["Student", "Sex"], table, rows,
+                           sum(r.count for r in rows), total_label="Total students")
+        if g == "department":
+            groups = {k: [] for k in DEPARTMENTS}
+            noinfo = []
+            for st in students:
+                dep = get_department(st.course_section, st.department)
+                (groups[dep] if dep else noinfo).append(st.full_name)
+            table = [[nm, dep] for dep in DEPARTMENTS for nm in sorted(groups[dep], key=str.lower)]
+            table += [[nm, "-"] for nm in sorted(noinfo, key=str.lower)]
+            rows = [schemas.TallyReportRow(group_label=dep, count=len(groups[dep]),
+                                           student_names=sorted(groups[dep])) for dep in DEPARTMENTS]
+            return section(g, "Students by department (all departments)", ["Student", "Department"], table, rows,
+                           sum(r.count for r in rows), total_label="Total students")
+        if g == "section":
+            groups = {}
+            for st in students:
+                groups.setdefault(st.course_section or "-", []).append(st.full_name)
+            table = [[nm, k] for k in sorted(groups) for nm in sorted(groups[k], key=str.lower)]
+            rows = [schemas.TallyReportRow(group_label=k, count=len(v), student_names=sorted(v)) for k, v in sorted(groups.items())]
+            return section(g, "Students by section", ["Student", "Course & section"], table, rows,
+                           sum(r.count for r in rows), total_label="Total students")
+        # monthly_status
+        groups = {}
+        uq = db.query(models.StatusUpdate)
+        if month_label: uq = uq.filter(models.StatusUpdate.month_label == month_label)
+        for u in uq.all():
+            nm = u.student.full_name if u.student else "Unknown"
+            lab = {"same": "Same boarding house", "transferred": "Transferred", "moved_home": "Moved home"}.get(u.status_type, u.status_type)
+            groups.setdefault(lab, []).append(nm)
+        table = [[nm, k] for k in sorted(groups) for nm in sorted(groups[k], key=str.lower)]
+        rows = [schemas.TallyReportRow(group_label=k, count=len(v), student_names=sorted(v)) for k, v in sorted(groups.items())]
+        return section(g, "Monthly status", ["Student", "Status"], table, rows,
+                       sum(r.count for r in rows), total_label="Total students")
+
+    return [compute(g) for g in group_by_list if g in valid]
 
 @app.get("/api/osas/reports/tally", response_model=schemas.TallyReportOut)
 def tally_report(group_by: str, month_label: Optional[str] = None,
@@ -1832,6 +2018,7 @@ def _fill_narrative_template(sections, month_label) -> str:
     guarantees every figure that ends up in the final report is real. Step 2
     (in _build_narrative) hands this filled template to the AI and asks it
     only to refine the wording/flow, not to invent or recompute numbers."""
+    sections = [sec for sec in sections if sec.group_by != "barangay_houses"]
     total_students = sum(sec.total for sec in sections if sec.rows)
     findings = []
     for sec in sections:
@@ -1861,6 +2048,7 @@ def _fill_narrative_template(sections, month_label) -> str:
     )
 
 SECTION_LABELS_BACKEND = {
+    "barangay_houses": "Boarding houses per barangay",
     "barangay": "Barangay", "boarding_house": "Boarding house", "gender": "Sex",
     "department": "Department", "section": "Section", "monthly_status": "Monthly status",
 }
@@ -2227,13 +2415,13 @@ def export_csv(group_by: str, month_label: Optional[str] = None,
     buf = io.StringIO()
     w = csv.writer(buf)
     for sec in sections:
-        w.writerow([f"Group by: {sec.group_by}",f"Month: {month_label or 'All'}"])
-        w.writerow(["Group", "Count", "Students"])
-        for row in sec.rows:
-            w.writerow([row.group_label, row.count, "; ".join(row.student_names)])
-        w.writerow(["Total", sec.total])
+        w.writerow([sec.title or sec.group_by, f"Month: {month_label or 'All'}"])
+        w.writerow(sec.columns)
+        for r in sec.table:
+            w.writerow([c.replace("\n", "; ") for c in r])
+        w.writerow([sec.total_label or "Total", sec.total])
         w.writerow([])
-    log_action(db, user, "export", "report", None, group_by, f"CSV export — {month_label or 'all months'}")
+    log_action(db, user, "export", "report", None, group_by, f"CSV export - {month_label or 'all months'}")
     return StreamingResponse(io.BytesIO(buf.getvalue().encode()),
         media_type="text/csv",
         headers={"Content-Disposition":f"attachment; filename=geotrack_report.csv"})
@@ -2242,7 +2430,7 @@ def export_csv(group_by: str, month_label: Optional[str] = None,
 def export_excel(group_by: str, month_label: Optional[str] = None,
                  db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
     from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.styles import Font, Alignment
     from openpyxl.utils import get_column_letter
     requested = [g.strip() for g in group_by.split(",") if g.strip()]
     sections  = _compute_tally(db, requested, month_label)
@@ -2250,23 +2438,29 @@ def export_excel(group_by: str, month_label: Optional[str] = None,
     for i, sec in enumerate(sections):
         ws = wb.create_sheet(title=sec.group_by[:31]) if i > 0 else wb.active
         ws.title = sec.group_by[:31]
-        ws.append([f"GeoTrack Tally Report — {sec.group_by}", f"Month: {month_label or 'All months'}"])
-        ws.append(["Group", "Count", "Students"])
+        ws.append([sec.title or sec.group_by, f"Month: {month_label or 'All months'}"])
+        ws["A1"].font = Font(bold=True)
+        ws.append(sec.columns)
         for cell in ws[2]: cell.font = Font(bold=True)
-        for row in sec.rows:
-            ws.append([row.group_label, row.count, "; ".join(row.student_names)])
-        ws.append(["Total", sec.total])
-        for col in range(1, 4):
-            ws.column_dimensions[get_column_letter(col)].width = [30, 10, 60][col-1]
+        for idx, r in enumerate(sec.table):
+            ws.append(r)
+            if idx in sec.bold_rows:
+                for cell in ws[ws.max_row]: cell.font = Font(bold=True)
+        ws.append([sec.total_label or "Total", sec.total])
+        for cell in ws[ws.max_row]: cell.font = Font(bold=True)
+        for row in ws.iter_rows(min_row=3):
+            for cell in row: cell.alignment = Alignment(wrap_text=True, vertical="top")
+        for col in range(1, len(sec.columns) + 1):
+            ws.column_dimensions[get_column_letter(col)].width = 28
     buf = BytesIO(); wb.save(buf); buf.seek(0)
-    log_action(db, user, "export", "report", None, group_by, f"Excel export — {month_label or 'all months'}")
+    log_action(db, user, "export", "report", None, group_by, f"Excel export - {month_label or 'all months'}")
     return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition":"attachment; filename=geotrack_report.xlsx"})
 
 @app.get("/api/osas/reports/export/pdf")
 def export_pdf(group_by: str, month_label: Optional[str] = None,
                db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
-    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer
     from reportlab.lib import colors
@@ -2274,14 +2468,8 @@ def export_pdf(group_by: str, month_label: Optional[str] = None,
     requested = [g.strip() for g in group_by.split(",") if g.strip()]
     sections  = _compute_tally(db, requested, month_label)
     buf = BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=36, bottomMargin=36)
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), topMargin=30, bottomMargin=30, leftMargin=30, rightMargin=30)
     styles = getSampleStyleSheet()
-    # Plain strings in a reportlab Table are drawn at a fixed width and
-    # never wrap - a group label longer than its column (e.g. a boarding
-    # house name with its barangay in parentheses) just overflows into the
-    # next column instead of dropping to a second line. Wrapping every
-    # cell in a Paragraph makes the table actually word-wrap within the
-    # column widths below, same as the header/body text elsewhere.
     cell_style = ParagraphStyle("cell", parent=styles["Normal"], fontSize=9, leading=12)
     header_style = ParagraphStyle("cellHeader", parent=cell_style, textColor=colors.white, fontName="Helvetica-Bold")
     bold_cell_style = ParagraphStyle("cellBold", parent=cell_style, fontName="Helvetica-Bold")
@@ -2292,13 +2480,17 @@ def export_pdf(group_by: str, month_label: Optional[str] = None,
     story = [Paragraph("GeoTrack Tally Report", styles["Title"]),
              Paragraph(f"Month: {month_label or 'All months'} | Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC", styles["Normal"]),
              Spacer(1, 16)]
+    usable = landscape(A4)[0] - 60
     for sec in sections:
-        story.append(Paragraph(f"Group by: {sec.group_by}", styles["Heading2"]))
-        data = [[cell("Group", header_style), cell("Count", header_style), cell("Students", header_style)]]
-        for row in sec.rows:
-            data.append([cell(row.group_label), cell(row.count), cell("\n".join(row.student_names))])
-        data.append([cell("Total", bold_cell_style), cell(sec.total, bold_cell_style), cell("")])
-        t = Table(data, colWidths=[150, 50, 300])
+        story.append(Paragraph(sec.title or sec.group_by, styles["Heading2"]))
+        ncol = max(1, len(sec.columns))
+        data = [[cell(c, header_style) for c in sec.columns]]
+        for idx, r in enumerate(sec.table):
+            st = bold_cell_style if idx in sec.bold_rows else cell_style
+            data.append([cell(c, st) for c in r])
+        data.append([cell(sec.total_label or "Total", bold_cell_style), cell(sec.total, bold_cell_style)]
+                    + [cell("")] * (ncol - 2))
+        t = Table(data, colWidths=[usable / ncol] * ncol, repeatRows=1)
         t.setStyle(TableStyle([
             ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#203f36")),
             ("TEXTCOLOR",  (0,0), (-1,0), colors.white),
@@ -2313,7 +2505,7 @@ def export_pdf(group_by: str, month_label: Optional[str] = None,
         story += [t, Spacer(1, 16)]
     doc.build(story)
     buf.seek(0)
-    log_action(db, user, "export", "report", None, group_by, f"PDF export — {month_label or 'all months'}")
+    log_action(db, user, "export", "report", None, group_by, f"PDF export - {month_label or 'all months'}")
     return StreamingResponse(buf, media_type="application/pdf",
         headers={"Content-Disposition":"attachment; filename=geotrack_report.pdf"})
 

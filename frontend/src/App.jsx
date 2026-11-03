@@ -12,7 +12,6 @@ import StudentHome      from "./pages/student/StudentHome";
 import StudentStatus    from "./pages/student/StudentStatus";
 import StudentDirectory from "./pages/student/StudentDirectory";
 import DormDetail       from "./pages/student/DormDetail";
-import StudentConcern   from "./pages/student/StudentConcern";
 import StudentSOS       from "./pages/student/StudentSOS";
 import StudentProfile   from "./pages/student/StudentProfile";
 import ForgotPassword   from "./pages/student/ForgotPassword";
@@ -27,15 +26,15 @@ import OsasDashboard      from "./pages/osas/OsasDashboard";
 import OsasAccounts       from "./pages/osas/OsasAccounts";
 import OsasStatusUpdates    from "./pages/osas/OsasStatusUpdates";
 import OsasHousingOversight from "./pages/osas/OsasHousingOversight";
-import OsasConcernsAlerts   from "./pages/osas/OsasConcernsAlerts";
 import OsasReports           from "./pages/osas/OsasReports";
+import OsasGeoMapPage        from "./pages/osas/OsasGeoMapPage";
+import OsasEmergencies       from "./pages/osas/OsasEmergencies";
 
 // Barangay pages
 import BarangayLogin      from "./pages/barangay/BarangayLogin";
 import BarangayLayout     from "./pages/barangay/BarangayLayout";
 import BarangayBoardingHouses from "./pages/barangay/BarangayBoardingHouses";
 import BarangayEmergencies    from "./pages/barangay/BarangayEmergencies";
-import BarangayConcerns       from "./pages/barangay/BarangayConcerns";
 import BarangayProfile        from "./pages/barangay/BarangayProfile";
 
 export default function App() {
@@ -62,7 +61,7 @@ export default function App() {
             <Route path="status"           element={<StudentStatus />} />
             <Route path="directory"        element={<StudentDirectory />} />
             <Route path="directory/:houseId" element={<DormDetail />} />
-            <Route path="concern"          element={<StudentConcern />} />
+            <Route path="concern"          element={<Navigate to="/student/home" replace />} />
             <Route path="sos"              element={<StudentSOS />} />
             <Route path="profile"          element={<StudentProfile />} />
           </Route>
@@ -83,7 +82,9 @@ export default function App() {
 
             {/* -- Consolidated pages (sidebar entries) -- */}
             <Route path="housing-oversight" element={<OsasHousingOversight />} />
-            <Route path="concerns-alerts"   element={<OsasConcernsAlerts />} />
+            <Route path="geo-map"           element={<OsasGeoMapPage />} />
+            <Route path="concerns"          element={<Navigate to="/osas/emergencies" replace />} />
+            <Route path="concerns-alerts"   element={<Navigate to="/osas/emergencies" replace />} />
 
             {/* -- Old paths kept working, landing on the matching tab, so
                  existing internal links/navigate() calls and any bookmarks
@@ -91,8 +92,7 @@ export default function App() {
             <Route path="risk-assessment" element={<Navigate to="/osas/status-updates" replace />} />
             <Route path="verification"    element={<OsasHousingOversight defaultTab={0} />} />
             <Route path="reviews"         element={<OsasHousingOversight defaultTab={1} />} />
-            <Route path="concerns"        element={<OsasConcernsAlerts defaultTab={0} />} />
-            <Route path="emergencies"     element={<OsasConcernsAlerts defaultTab={1} />} />
+            <Route path="emergencies"     element={<OsasEmergencies />} />
           </Route>
 
           {/* -- Barangay (public) -- */}
@@ -106,7 +106,6 @@ export default function App() {
           }>
             <Route path="boarding-houses" element={<BarangayBoardingHouses />} />
             <Route path="emergencies"     element={<BarangayEmergencies />} />
-            <Route path="concerns"        element={<BarangayConcerns />} />
             <Route path="profile"         element={<BarangayProfile />} />
           </Route>
 

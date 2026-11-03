@@ -16,6 +16,7 @@ export default function StudentProfile() {
   const [fullName, setFullName] = useState("");
   const [courseSection, setCourseSection] = useState("");
   const [gender, setGender] = useState("");
+  const [department, setDepartment] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => { load(); }, []);
@@ -23,7 +24,7 @@ export default function StudentProfile() {
   function load() {
     setLoading(true);
     api.student.myProfile()
-      .then(d => { setProfile(d); setFullName(d.full_name); setCourseSection(d.course_section||""); setGender(d.gender||""); })
+      .then(d => { setProfile(d); setFullName(d.full_name); setCourseSection(d.course_section||""); setGender(d.gender||""); setDepartment(d.department||""); })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
   }
@@ -32,7 +33,7 @@ export default function StudentProfile() {
     e.preventDefault();
     setSaving(true); setError(""); setSuccess("");
     try {
-      const updated = await api.student.updateMyProfile({ full_name:fullName, course_section:courseSection, gender:gender||null });
+      const updated = await api.student.updateMyProfile({ full_name:fullName, course_section:courseSection, gender:gender||null, department:department||null });
       setProfile(updated);
       updateFullName(updated.full_name);   // update nav/home immediately
       setEditing(false); setSuccess("Profile updated.");
@@ -74,24 +75,8 @@ export default function StudentProfile() {
                   ["Full name", profile.full_name],
                   ["Institutional email", profile.email],
                   ["Course & section", profile.course_section || "Not set"],
-                  ["Sex", profile.gender ? profile.gender.replace("_"," ") : "Prefer not to say"],
-                  ["Member since", new Date(profile.created_at).toLocaleDateString()],
-                ].map(([lbl, val]) => (
-                  <div key={lbl} style={{marginBottom:14}}>
-                    <div style={{fontSize:11,color:"#857d6c",fontWeight:600,textTransform:"capitalize"}}>{lbl}</div>
-                    <div style={{fontSize:14}}>{val}</div>
-                  </div>
-                ))}
-              </div>
-              <div>
-                <div style={{fontSize:11.5,fontWeight:700,color:"#544f43",marginBottom:10,textTransform:"uppercase",letterSpacing:".03em"}}>
-                  Boarding house & landlord
-                </div>
-                {[
-                  ["Boarding house", profile.current_boarding_house || "Not yet reported"],
-                  ["Barangay", profile.current_barangay || "Not yet reported"],
-                  ["Landlord", profile.landlord_name || "Not on file"],
-                  ["Landlord contact", profile.landlord_contact || "Not on file"],
+                  ["Department", profile.department || "Not set"],
+                  ["Sex", profile.gender || "Not set"],
                 ].map(([lbl, val]) => (
                   <div key={lbl} style={{marginBottom:14}}>
                     <div style={{fontSize:11,color:"#857d6c",fontWeight:600,textTransform:"capitalize"}}>{lbl}</div>
@@ -100,7 +85,9 @@ export default function StudentProfile() {
                 ))}
               </div>
             </div>
-            <button className="btn primary" style={{width:"100%",padding:13,marginTop:4}} onClick={() => setEditing(true)}>Edit profile</button>
+            {(!profile.course_section || !profile.department || !profile.gender) && (
+              <button className="btn primary" style={{width:"100%",padding:13,marginTop:4}} onClick={() => setEditing(true)}>Complete my profile</button>
+            )}
           </div>
           )
         ) : (
@@ -108,11 +95,18 @@ export default function StudentProfile() {
             <div className="card-title">Edit profile</div>
             <form onSubmit={handleSave}>
               <div className="field"><label>Full name</label><input value={fullName} onChange={e=>setFullName(e.target.value)} required /></div>
-              <div className="field"><label>Course &amp; section</label><input value={courseSection} onChange={e=>setCourseSection(e.target.value)} placeholder="e.g. BSIT-3A" /></div>
+              <div className="field"><label>Course &amp; section</label><input value={courseSection} onChange={e=>setCourseSection(e.target.value)} placeholder="e.g. BSIT-3A" required /></div>
+              <div className="field">
+                <label>Department</label>
+                <select value={department} onChange={e=>setDepartment(e.target.value)} required>
+                  <option value="">Select department</option>
+                  {["CCS","COE","CTE","CBAA","CIT","CCJE","CAS","CHMT"].map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
               <div className="field">
                 <label>Sex</label>
-                <select value={gender} onChange={e=>setGender(e.target.value)}>
-                  <option value="">Prefer not to say</option>
+                <select value={gender} onChange={e=>setGender(e.target.value)} required>
+                  <option value="">Select sex</option>
                   <option value="male">Male</option>
                   <option value="female">Female</option>
                 </select>
