@@ -22,6 +22,7 @@ export default function BarangayProfile() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     api.barangay.myProfile()
@@ -54,7 +55,7 @@ export default function BarangayProfile() {
       });
       setProfile(updated);
       updateFullName?.(updated.full_name);
-      setSaved(true);
+      setSaved(true); setEditing(false);
     } catch (err) {
       setSaveError(
         err.message === "Failed to fetch"
@@ -97,22 +98,22 @@ export default function BarangayProfile() {
                 their side (e.g. the SOS emergency contacts). */}
             <div className="field" style={{ marginBottom: 12 }}>
               <label>Full name</label>
-              <input type="text" placeholder="e.g. Juan Dela Cruz"
+              <input type="text" placeholder="e.g. Juan Dela Cruz" disabled={!editing}
                 value={fullNameInput} onChange={e => setFullNameInput(e.target.value)} />
             </div>
             <div className="field" style={{ marginBottom: 12 }}>
               <label>Position</label>
-              <input type="text" placeholder="e.g. Barangay Captain"
+              <input type="text" placeholder="e.g. Barangay Captain" disabled={!editing}
                 value={position} onChange={e => setPosition(e.target.value)} />
             </div>
             <div className="field" style={{ marginBottom: 12 }}>
               <label>Email</label>
-              <input type="email" placeholder="name@example.com"
+              <input type="email" placeholder="name@example.com" disabled={!editing}
                 value={email} onChange={e => setEmail(e.target.value)} />
             </div>
             <div className="field" style={{ marginBottom: 8 }}>
               <label>Contact number</label>
-              <input type="tel" placeholder="e.g. 09171234567"
+              <input type="tel" placeholder="e.g. 09171234567" disabled={!editing}
                 value={contactNumber} onChange={e => setContactNumber(e.target.value)} />
             </div>
 
@@ -123,11 +124,19 @@ export default function BarangayProfile() {
               </div>
             )}
 
-            <button className="btn primary" style={{ width: "100%", padding: 12 }}
-              disabled={saving} onClick={handleSave}>
-              {saving ? "Saving..." : "Save"}
-            </button>
-
+            {!editing ? (
+              <button className="btn primary" style={{ width: "100%", padding: 12 }}
+                onClick={() => { setSaved(false); setEditing(true); }}>Edit profile</button>
+            ) : (
+              <div style={{ display: "flex", gap: 10 }}>
+                <button className="btn primary" style={{ flex: 1, padding: 12 }}
+                  disabled={saving} onClick={handleSave}>{saving ? "Saving..." : "Save"}</button>
+                <button className="btn" style={{ padding: 12 }} disabled={saving}
+                  onClick={() => { setEditing(false); setSaveError("");
+                    if (profile) { setFullNameInput(profile.full_name || ""); setContactNumber(profile.contact_number || "");
+                      setEmail(profile.email || ""); setPosition(profile.position || ""); } }}>Cancel</button>
+              </div>
+            )}
           </>
         )}
       </div>

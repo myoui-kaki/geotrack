@@ -978,6 +978,8 @@ def edit_status(uid: int, payload: schemas.StatusUpdateEdit, db: Session = Depen
     u = db.get(models.StatusUpdate, uid)
     if not u: raise HTTPException(404, "Not found")
     if u.student_id != user.id: raise HTTPException(403, "Not yours")
+    if u.month_label != datetime.utcnow().strftime("%B %Y"):
+        raise HTTPException(403, "Past months can no longer be edited.")
     data = payload.dict(exclude_unset=True)
     if "amenities_checklist" in data:
         checklist = data.pop("amenities_checklist")
@@ -992,7 +994,7 @@ def delete_status(uid: int, db: Session = Depends(get_db), user: models.User = D
     u = db.query(models.StatusUpdate).get(uid)
     if not u: raise HTTPException(404, "Not found")
     if u.student_id != user.id: raise HTTPException(403, "Not yours")
-    db.delete(u); db.commit()
+    raise HTTPException(403, "Status updates can't be deleted.")
     log_action(db, user, "delete", "status_update", uid, None, "Status update deleted")
     return {"message": "Deleted"}
 

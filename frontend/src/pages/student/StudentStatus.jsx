@@ -389,7 +389,7 @@ export default function StudentStatus() {
               <div className="card-title">You're all set for {CURRENT_MONTH}</div>
               <p style={{ fontSize:13, color:"#544f43" }}>
                 Your monthly check-in, including your boarding house photo and amenities checklist, has been submitted.
-                This form will reopen automatically next month. You can still edit or delete this month's entry below.
+                This form will reopen automatically next month. You can still edit this month's entry below.
               </p>
             </>
           ) : (
@@ -518,18 +518,14 @@ export default function StudentStatus() {
                     <span className={`badge ${u.is_flagged ? "warn" : "ok"}`}>
                       {u.is_flagged ? "Flagged" : "Confirmed"}
                     </span>
+                    {u.month_label === CURRENT_MONTH ? (
                     <button
                       onClick={() => setEditingId(u.id)}
                       style={{ background: "none", border: "none", color: "var(--moss-dark)", fontSize: 11, cursor: "pointer", padding: 0, fontWeight: 700 }}
                     >
                       Edit
                     </button>
-                    <button
-                      onClick={() => handleDeleteUpdate(u.id)}
-                      style={{ background: "none", border: "none", color: "var(--pin)", fontSize: 11, cursor: "pointer", padding: 0 }}
-                    >
-                      Delete
-                    </button>
+                    ) : <span style={{ fontSize: 11, color: "#a39c8a" }}>Locked</span>}
                   </div>
                 </div>
               )
