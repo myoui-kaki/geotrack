@@ -4,6 +4,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useSessionTimeout } from "../../hooks/useSessionTimeout";
 import InstallAppButton from "../../components/InstallAppButton";
+import OsasBell from "../../components/OsasBell";
 import PortalFooter from "../../components/PortalFooter";
 import "./osas.css";
 import { dialog } from "../../components/dialogs";
@@ -94,6 +95,7 @@ export default function OsasLayout() {
           </button>
           <div className="brand-mark"><span className="pin-dot"></span> GEOTRACK</div>
         </div>
+        <div style={{display:"flex",justifyContent:"flex-end",padding:"0 0 10px"}}><OsasBell /></div>
         <div className="page-fade" style={{flex:1}} key={location.pathname}><Outlet /></div>
         <PortalFooter />
       </main>

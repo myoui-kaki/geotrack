@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../../api/client";
 import { useAuth } from "../../context/AuthContext";
+import { dialog } from "../../components/dialogs";
 
 export default function BarangayProfile() {
   const { fullName: sessionFullName, updateFullName } = useAuth();
@@ -42,6 +43,7 @@ export default function BarangayProfile() {
   }, []);
 
   async function handleSave() {
+    if (!(await dialog.confirm({ title:"Save changes?", message:"Update your profile information?", confirmText:"Save" }))) return;
     setSaving(true); setSaveError(""); setSaved(false);
     try {
       const updated = await api.barangay.updateProfile({

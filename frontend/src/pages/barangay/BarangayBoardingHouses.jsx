@@ -26,11 +26,16 @@ export default function BarangayBoardingHouses() {
   }
 
   async function setPermit(h, value) {
-    if (!value && !(await dialog.confirm({
+    const ok = await dialog.confirm(value ? {
+      title: "Mark as with permit?",
+      message: `"${h.name}" will be marked Verified (with permit) and the student and OSAS will be notified.`,
+      confirmText: "With permit",
+    } : {
       title: "Mark as without permit?",
       message: `"${h.name}" will be marked Rejected (without permit) and the student and OSAS will be notified.`,
-      confirmText: "Without permit", danger: true,
-    }))) return;
+      confirmText: "Without permit", variant: "danger",
+    });
+    if (!ok) return;
     try { await api.barangay.confirmPermit(h.id, value); load(); }
     catch (err) { setError(err.message); }
   }

@@ -60,7 +60,8 @@ export default function OsasAccounts() {
             : api.osas.archiveBarangayAccount(id));
   }
 
-  function restore(a) {
+  async function restore(a) {
+    if (!(await dialog.confirm({ title:"Restore this account?", message:`${a.full_name} will be able to sign in again.`, confirmText:"Restore" }))) return;
     run(() => a.role === "osas_admin" ? api.osas.unarchiveAccount(a.id)
             : a.role === "student" ? api.osas.unarchiveStudent(a.id)
             : api.osas.unarchiveBarangayAccount(a.id));

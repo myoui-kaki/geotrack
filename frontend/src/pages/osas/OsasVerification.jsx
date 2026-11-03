@@ -39,6 +39,10 @@ export default function OsasVerification() {
   const [editGeoError, setEditGeoError] = useState("");
   const [showEditMap, setShowEditMap] = useState(false);
 
+  const [search, setSearch] = useState("");
+  const [fBarangay, setFBarangay] = useState("");
+  const [fStatus, setFStatus] = useState("");
+
   const [expandedHouseId, setExpandedHouseId] = useState(null);
   const [reviewsByHouse, setReviewsByHouse] = useState({});
 
@@ -51,6 +55,16 @@ export default function OsasVerification() {
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
   }
+
+  const barangays = [...new Set(houses.map(h => h.barangay).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const q = search.trim().toLowerCase();
+  const shown = houses
+    .filter(h => !fBarangay || h.barangay === fBarangay)
+    .filter(h => !fStatus || h.verification_status === fStatus)
+    .filter(h => !q || [h.name, h.barangay, h.contact_person, h.contact_number, h.submitted_by]
+      .some(v => (v || "").toLowerCase().includes(q)))
+    .sort((a, b) => (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base" }));
+  const filtersOn = !!(q || fBarangay || fStatus);
 
   // ── Centered confirmation popups (verify / reject / unverify / delete) ──
   const [dialog, setDialog] = useState(null);   // { kind, house }
@@ -150,6 +164,37 @@ export default function OsasVerification() {
 
       {error && <div className="error-banner">{error}</div>}
 
+      <div className="card" style={{marginBottom:18}}>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <div className="field" style={{flex:1,minWidth:220,marginBottom:0}}>
+            <label>Search</label>
+            <input placeholder="Boarding house, landlord, contact, submitted by..." value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+          <div className="field" style={{marginBottom:0}}>
+            <label>Barangay</label>
+            <select value={fBarangay} onChange={e => setFBarangay(e.target.value)}>
+              <option value="">All barangays</option>
+              {barangays.map(b => <option key={b} value={b}>{b}</option>)}
+            </select>
+          </div>
+          <div className="field" style={{marginBottom:0}}>
+            <label>Status</label>
+            <select value={fStatus} onChange={e => setFStatus(e.target.value)}>
+              <option value="">All statuses</option>
+              <option value="unverified">Unverified</option>
+              <option value="verified">Verified</option>
+              <option value="rejected">Rejected</option>
+            </select>
+          </div>
+          {filtersOn && (
+            <button type="button" className="btn" onClick={() => { setSearch(""); setFBarangay(""); setFStatus(""); }}>Clear filters</button>
+          )}
+        </div>
+        <div style={{fontSize:11.5,color:"#a39c8a",marginTop:10}}>
+          Showing {shown.length} of {houses.length} boarding house{houses.length===1?"":"s"}, A-Z by name.
+        </div>
+      </div>
+
       <div className="card">
         {loading ? <div className="loading-text">Loading...</div>
         : houses.length === 0 ? <div className="review-empty">No boarding houses submitted yet. Students add them when they register or update their monthly status.</div>
@@ -157,7 +202,8 @@ export default function OsasVerification() {
           <table>
             <tbody>
               <tr><th>Boarding house</th><th>Barangay</th><th>Landlord</th><th>Contact</th><th>Submitted by</th><th>Status</th><th></th></tr>
-              {houses.map(h => (
+              {shown.length === 0 && <tr><td colSpan={7} style={{color:"#a39c8a"}}>No boarding houses match these filters.</td></tr>}
+              {shown.map(h => (
                 <>
                   <tr key={h.id}>
                     {editingId === h.id ? (

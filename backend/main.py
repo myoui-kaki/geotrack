@@ -564,10 +564,15 @@ def google_auth_barangay(payload: schemas.GoogleAuthRequest, db: Session = Depen
             return schemas.TokenResponse(access_token="", role="barangay", requires_terms=True,
                                          full_name=info.get("name") or email.split("@")[0])
         barangay_name = (payload.barangay_name or "").strip()
-        if not barangay_name:
-            raise HTTPException(400, "Please enter which barangay this account represents.")
+        full_name = (payload.full_name or "").strip()
+        position = (payload.position or "").strip()
+        contact = (payload.contact_number or "").strip()
+        missing = [l for l, v in (("barangay", barangay_name), ("full name", full_name),
+                                  ("position", position), ("contact number", contact)) if not v]
+        if missing:
+            raise HTTPException(400, "Please fill in: " + ", ".join(missing) + ".")
         user = models.User(
-            full_name=info.get("name") or email.split("@")[0],
+            full_name=full_name, position=position, contact_number=contact,
             email=email, hashed_password=hash_password(secrets.token_urlsafe(32)),
             role="barangay", barangay_name=barangay_name,
             is_email_verified=True, google_sub=info["sub"],
@@ -1187,6 +1192,30 @@ def dashboard(db: Session = Depends(get_db), user: models.User = Depends(require
         recent_activities=activities,
     )
 
+@app.get("/api/osas/action-items")
+def osas_action_items(db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
+    """Everything OSAS still has to do: students who haven't filed this
+    month's update, boarding houses waiting for approval, active SOS cases,
+    and flagged updates."""
+    month = datetime.utcnow().strftime("%B %Y")
+    students = [s_ for s_ in db.query(models.User).filter(models.User.role == "student").all()
+                if s_.archived_at is None]
+    done = {u.student_id for u in db.query(models.StatusUpdate).filter(models.StatusUpdate.month_label == month).all()}
+    pending_students = sorted((s_ for s_ in students if s_.id not in done), key=lambda s_: s_.full_name.lower())
+    houses = sorted((h for h in db.query(models.BoardingHouse).filter(
+                        models.BoardingHouse.is_verified == False, models.BoardingHouse.rejected_at.is_(None)).all()),
+                    key=lambda h: ((h.barangay or "").lower(), (h.name or "").lower()))
+    sos = db.query(models.EmergencyCase).filter(models.EmergencyCase.status.in_(["Active", "Responding"])).all()
+    flagged = db.query(models.StatusUpdate).filter(models.StatusUpdate.is_flagged == True).count()
+    return {
+        "month": month,
+        "students_to_update": [{"id": s_.id, "name": s_.full_name, "email": s_.email} for s_ in pending_students],
+        "houses_to_verify": [{"id": h.id, "name": h.name, "barangay": h.barangay} for h in houses],
+        "active_emergencies": len(sos),
+        "flagged_updates": flagged,
+        "total": len(pending_students) + len(houses) + len(sos) + flagged,
+    }
+
 @app.get("/api/osas/compliance/dashboard")
 def compliance_dashboard(
     db: Session = Depends(get_db),
@@ -1326,7 +1355,8 @@ def flag_update(
 
 @app.get("/api/osas/boarding-houses", response_model=List[schemas.BoardingHouseOut])
 def list_bh(db: Session = Depends(get_db), user: models.User = Depends(require_osas_admin)):
-    return db.query(models.BoardingHouse).all()
+    return sorted(db.query(models.BoardingHouse).all(),
+                  key=lambda h: ((h.barangay or "").lower(), (h.name or "").lower()))
 
 @app.patch("/api/osas/boarding-houses/{hid}/verify", response_model=schemas.BoardingHouseOut)
 def verify_bh(hid: int, payload: Optional[schemas.BoardingHouseVerify] = None,
@@ -1418,16 +1448,16 @@ def barangay_update_profile(payload: schemas.BarangayProfileUpdate, db: Session 
 
 @app.get("/api/barangay/boarding-houses", response_model=List[schemas.BoardingHouseOut])
 def barangay_list_bh(db: Session = Depends(get_db), user: models.User = Depends(require_barangay)):
-    return (db.query(models.BoardingHouse)
-              .filter(models.BoardingHouse.barangay == user.barangay_name)
-              .all())
+    houses = [h for h in db.query(models.BoardingHouse).all()
+              if _same_barangay(h.barangay, user.barangay_name)]
+    return sorted(houses, key=lambda h: (h.name or "").lower())
 
 @app.patch("/api/barangay/boarding-houses/{hid}/permit", response_model=schemas.BoardingHouseOut)
 def barangay_confirm_permit(hid: int, payload: schemas.BarangayPermitUpdate,
                              db: Session = Depends(get_db), user: models.User = Depends(require_barangay)):
     h = db.query(models.BoardingHouse).get(hid)
     if not h: raise HTTPException(404, "Not found")
-    if h.barangay != user.barangay_name:
+    if not _same_barangay(h.barangay, user.barangay_name):
         raise HTTPException(403, "This boarding house is outside your barangay.")
     h.has_barangay_permit = payload.has_barangay_permit
     # The barangay's own permit confirmation is what actually grants
@@ -1956,30 +1986,20 @@ def _compute_tally(db, group_by_list, month_label):
             return section(g, "Boarding houses per barangay",
                            ["Barangay", "Boarding houses", "No. of boarding houses"],
                            table, rows, sum(r.count for r in rows), total_label="Total boarding houses")
-        if g == "gender":
-            groups = {k: [] for k in SEX_LABELS}
-            noinfo = []
+        if g in ("gender", "department"):
+            labels = SEX_LABELS if g == "gender" else DEPARTMENTS
+            groups = {k: [] for k in labels}
             for st in students:
-                lab = _sex_label(st.gender)
-                (groups[lab] if lab else noinfo).append(st.full_name)
-            table = [[nm, lab] for lab in SEX_LABELS for nm in sorted(groups[lab], key=str.lower)]
-            table += [[nm, "-"] for nm in sorted(noinfo, key=str.lower)]
-            rows = [schemas.TallyReportRow(group_label=lab, count=len(groups[lab]),
-                                           student_names=sorted(groups[lab])) for lab in SEX_LABELS]
-            return section(g, "Students by sex", ["Student", "Sex"], table, rows,
-                           sum(r.count for r in rows), total_label="Total students")
-        if g == "department":
-            groups = {k: [] for k in DEPARTMENTS}
-            noinfo = []
-            for st in students:
-                dep = get_department(st.course_section, st.department)
-                (groups[dep] if dep else noinfo).append(st.full_name)
-            table = [[nm, dep] for dep in DEPARTMENTS for nm in sorted(groups[dep], key=str.lower)]
-            table += [[nm, "-"] for nm in sorted(noinfo, key=str.lower)]
-            rows = [schemas.TallyReportRow(group_label=dep, count=len(groups[dep]),
-                                           student_names=sorted(groups[dep])) for dep in DEPARTMENTS]
-            return section(g, "Students by department (all departments)", ["Student", "Department"], table, rows,
-                           sum(r.count for r in rows), total_label="Total students")
+                lab = _sex_label(st.gender) if g == "gender" else get_department(st.course_section, st.department)
+                if lab in groups: groups[lab].append(st.full_name)
+            table, rows = [], []
+            for lab in labels:
+                names = sorted(groups[lab], key=str.lower)
+                table.append(["\n".join(names) if names else "-", lab, str(len(names))])
+                rows.append(schemas.TallyReportRow(group_label=lab, count=len(names), student_names=names))
+            title = "Students by sex" if g == "gender" else "Students by department (all departments)"
+            return section(g, title, ["Student(s)", "Sex" if g == "gender" else "Department", "No. of students"],
+                           table, rows, sum(r.count for r in rows), total_label="Total students")
         if g == "section":
             groups = {}
             for st in students:

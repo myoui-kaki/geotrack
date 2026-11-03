@@ -164,6 +164,7 @@ export const api = {
     checkMissedSubmissions:   () => request("/osas/compliance/check-missed",{method:"POST"}),
     updateComplianceFlags:    () => request("/osas/compliance/update-flags",{method:"POST"}),
     riskAssessment:           () => request("/osas/risk-assessment"),
+    actionItems:              () => request("/osas/action-items"),
     myProfile:                () => request("/osas/me"),
     updateProfile:            p  => request("/osas/me",{method:"PATCH",body:p}),
 },

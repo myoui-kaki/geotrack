@@ -31,6 +31,9 @@ export default function GoogleSignInButton({ role, onSuccess, onError, divider =
 
   const [pending, setPending] = useState(null);      // Google credential awaiting Terms
   const [barangayName, setBarangayName] = useState("");
+  const [bFullName, setBFullName] = useState("");
+  const [bPosition, setBPosition] = useState("");
+  const [bContact, setBContact] = useState("");
   const [modalError, setModalError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -74,14 +77,16 @@ export default function GoogleSignInButton({ role, onSuccess, onError, divider =
   }, [role]);
 
   async function agreeAndCreate() {
-    if (role === "barangay" && !barangayName.trim()) {
-      setModalError("Please enter which barangay you represent."); return;
+    if (role === "barangay") {
+      const missing = [[barangayName, "barangay"], [bFullName, "full name"], [bPosition, "position"], [bContact, "contact number"]]
+        .filter(([v]) => !v.trim()).map(([, l]) => l);
+      if (missing.length) { setModalError("Please fill in: " + missing.join(", ") + "."); return; }
     }
     setBusy(true); setModalError("");
     try {
       const session = await api.googleAuth(role, pending, {
         accept_terms: true,
-        ...(role === "barangay" ? { barangay_name: barangayName.trim() } : {}),
+        ...(role === "barangay" ? { barangay_name: barangayName.trim(), full_name: bFullName.trim(), position: bPosition.trim(), contact_number: bContact.trim() } : {}),
       });
       setPending(null);
       onSuccessRef.current?.(session);
@@ -127,14 +132,15 @@ export default function GoogleSignInButton({ role, onSuccess, onError, divider =
             }}>{role === "student" ? STUDENT_TERMS : STAFF_TERMS}</pre>
 
             {role === "barangay" && (
-              <div style={{ marginBottom: 12 }}>
-                <label style={{ display: "block", fontSize: 12.5, fontWeight: 600, marginBottom: 6, color: "#544f43" }}>
-                  Barangay you represent
-                </label>
-                <input value={barangayName} onChange={e => setBarangayName(e.target.value)}
-                  placeholder="e.g. Brgy. Del Remedio"
-                  style={{ width: "100%", padding: "11px 12px", borderRadius: 10, border: "1px solid var(--line)",
-                           fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }} />
+              <div style={{ marginBottom: 12, display: "grid", gap: 10 }}>
+                <div><label style={{ display: "block", fontSize: 12.5, fontWeight: 600, marginBottom: 6, color: "#544f43" }}>Barangay you represent *</label>
+                  <input value={barangayName} onChange={e => setBarangayName(e.target.value)} placeholder="e.g. Brgy. Del Remedio" style={{ width: "100%", padding: "11px 12px", borderRadius: 10, border: "1px solid var(--line)", fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }} /></div>
+                <div><label style={{ display: "block", fontSize: 12.5, fontWeight: 600, marginBottom: 6, color: "#544f43" }}>Full name *</label>
+                  <input value={bFullName} onChange={e => setBFullName(e.target.value)} style={{ width: "100%", padding: "11px 12px", borderRadius: 10, border: "1px solid var(--line)", fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }} /></div>
+                <div><label style={{ display: "block", fontSize: 12.5, fontWeight: 600, marginBottom: 6, color: "#544f43" }}>Position *</label>
+                  <input value={bPosition} onChange={e => setBPosition(e.target.value)} placeholder="e.g. Barangay Captain" style={{ width: "100%", padding: "11px 12px", borderRadius: 10, border: "1px solid var(--line)", fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }} /></div>
+                <div><label style={{ display: "block", fontSize: 12.5, fontWeight: 600, marginBottom: 6, color: "#544f43" }}>Contact number *</label>
+                  <input type="tel" value={bContact} onChange={e => setBContact(e.target.value)} placeholder="e.g. 09171234567" style={{ width: "100%", padding: "11px 12px", borderRadius: 10, border: "1px solid var(--line)", fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }} /></div>
               </div>
             )}
 

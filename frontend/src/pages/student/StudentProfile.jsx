@@ -31,6 +31,7 @@ export default function StudentProfile() {
 
   async function handleSave(e) {
     e.preventDefault();
+    if (!(await dialog.confirm({ title:"Save changes?", message:"Update your profile information?", confirmText:"Save changes" }))) return;
     setSaving(true); setError(""); setSuccess("");
     try {
       const updated = await api.student.updateMyProfile({ full_name:fullName, course_section:courseSection, gender:gender||null, department:department||null });
@@ -76,7 +77,7 @@ export default function StudentProfile() {
                   ["Institutional email", profile.email],
                   ["Course & section", profile.course_section || "Not set"],
                   ["Department", profile.department || "Not set"],
-                  ["Sex", profile.gender || "Not set"],
+                  ["Sex", profile.gender ? profile.gender.charAt(0).toUpperCase() + profile.gender.slice(1) : "Not set"],
                 ].map(([lbl, val]) => (
                   <div key={lbl} style={{marginBottom:14}}>
                     <div style={{fontSize:11,color:"#857d6c",fontWeight:600,textTransform:"capitalize"}}>{lbl}</div>
@@ -85,9 +86,7 @@ export default function StudentProfile() {
                 ))}
               </div>
             </div>
-            {(!profile.course_section || !profile.department || !profile.gender) && (
-              <button className="btn primary" style={{width:"100%",padding:13,marginTop:4}} onClick={() => setEditing(true)}>Complete my profile</button>
-            )}
+            <button className="btn primary" style={{width:"100%",padding:13,marginTop:4}} onClick={() => { setSuccess(""); setEditing(true); }}>Edit profile</button>
           </div>
           )
         ) : (

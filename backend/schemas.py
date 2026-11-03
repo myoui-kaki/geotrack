@@ -92,6 +92,9 @@ class GoogleAuthRequest(BaseModel):
     # barangay account (its barangay_name is already set and isn't changed
     # by signing in again).
     barangay_name: Optional[str] = None
+    full_name: Optional[str] = None
+    position: Optional[str] = None
+    contact_number: Optional[str] = None
     # A brand-new account is only created once this is True (the person has
     # agreed to the Terms & Conditions). Existing accounts ignore it.
     accept_terms: bool = False
