@@ -4,6 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import { useAuth } from "../../context/AuthContext";
 import GoogleSignInButton from "../../components/GoogleSignInButton";
+import BarangaySelect from "../../components/BarangaySelect";
+import LocationPicker from "../../components/LocationPicker";
 import InstallAppButton from "../../components/InstallAppButton";
 import { STUDENT_TERMS as TERMS } from "../../components/termsText";
 import "./student.css";
@@ -42,17 +44,6 @@ function emailHint(email) {
   return { ok: true, msg: "LSPU student ID email accepted" };
 }
 
-async function geocode(address) {
-  const q = `${address}, San Pablo City, Laguna, Philippines`;
-  const res = await fetch(
-    `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`,
-    { headers: { "Accept-Language": "en" } }
-  );
-  if (!res.ok) throw new Error("Address lookup failed.");
-  const data = await res.json();
-  return data.length ? { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), displayName: data[0].display_name } : null;
-}
-
 export default function StudentLogin() {
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
@@ -65,12 +56,9 @@ export default function StudentLogin() {
   const [landlordEmail, setLandlordEmail] = useState("");
   const [bhName, setBhName] = useState("");
   const [bhBarangay, setBhBarangay] = useState("");
-  const [bhAddress, setBhAddress] = useState("");
   const [landlordName, setLandlordName] = useState("");
   const [landlordContact, setLandlordContact] = useState("");
-  const [geocoding, setGeocoding] = useState(false);
   const [pinnedLocation, setPinnedLocation] = useState(null);
-  const [geocodeError, setGeocodeError] = useState("");
   const [termsOpen, setTermsOpen] = useState(false);
   const [termsAgreed, setTermsAgreed] = useState(false);
   const [error, setError] = useState("");
@@ -83,18 +71,6 @@ export default function StudentLogin() {
   const emailOk = isLspu(email);
   const hint = emailHint(email);
 
-  async function handleFindLocation() {
-    if (!bhBarangay.trim()) { setGeocodeError("Enter at least a barangay."); return; }
-    setGeocoding(true); setGeocodeError(""); setPinnedLocation(null);
-    try {
-      const addr = bhAddress.trim() ? `${bhAddress}, ${bhBarangay}` : bhBarangay;
-      const res = await geocode(addr);
-      if (!res) setGeocodeError("Address not found. Try a more specific location.");
-      else setPinnedLocation(res);
-    } catch (e) { setGeocodeError(e.message); }
-    finally { setGeocoding(false); }
-  }
-
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
@@ -104,6 +80,7 @@ export default function StudentLogin() {
         [fullName, "full name"], [courseSection, "course & section"], [department, "department"], [gender, "sex"],
         [bhName, "boarding house name"], [bhBarangay, "barangay"], [landlordName, "landlord name"],
         [landlordEmail, "landlord email"], [landlordContact, "landlord contact number"],
+        [pinnedLocation ? "x" : "", "boarding house pin on the map"],
       ].filter(([v]) => !(v || "").trim()).map(([, l]) => l);
       if (missing.length) { setError("Please fill in: " + missing.join(", ") + "."); return; }
     }
@@ -273,15 +250,11 @@ export default function StudentLogin() {
               </p>
               <div className="field">
                 <label>Boarding house name *</label>
-                <input required value={bhName} onChange={e => { setBhName(e.target.value); setPinnedLocation(null); }} placeholder="e.g. Sto. Niño Lodge" />
+                <input required value={bhName} onChange={e => setBhName(e.target.value)} placeholder="e.g. Sto. Niño Lodge" />
               </div>
               <div className="field">
                 <label>Barangay *</label>
-                <input required value={bhBarangay} onChange={e => { setBhBarangay(e.target.value); setPinnedLocation(null); }} placeholder="e.g. Brgy. Del Remedio" />
-              </div>
-              <div className="field">
-                <label>Street / landmark <span style={{ color:"#a39c8a" }}>(optional)</span></label>
-                <input value={bhAddress} onChange={e => { setBhAddress(e.target.value); setPinnedLocation(null); }} placeholder="e.g. near SPC public market" />
+                <BarangaySelect value={bhBarangay} onChange={v => setBhBarangay(v)} />
               </div>
               <div className="field">
                 <label>Landlord name *</label>
@@ -295,16 +268,10 @@ export default function StudentLogin() {
                 <label>Landlord contact number *</label>
                 <input required value={landlordContact} onChange={e => setLandlordContact(e.target.value)} placeholder="e.g. 0917-503-4490" />
               </div>
-              <button type="button" className="btn" style={{ width:"100%", padding:10 }}
-                onClick={handleFindLocation} disabled={geocoding || !bhBarangay.trim()}>
-                {geocoding ? "Finding location..." : "Find location on map"}
-              </button>
-              {geocodeError && <div style={{ fontSize:11, color:"var(--pin)", marginTop:6 }}>{geocodeError}</div>}
-              {pinnedLocation && (
-                <div style={{ marginTop:8, padding:"7px 10px", background:"#e1f0e6", borderRadius:8, fontSize:11.5, color:"var(--ok)" }}>
-                  Pinned: {pinnedLocation.displayName}
-                </div>
-              )}
+              <div className="field">
+                <label>Pin the exact location of your boarding house *</label>
+                <LocationPicker value={pinnedLocation} onChange={setPinnedLocation} barangay={bhBarangay} height={240} />
+              </div>
             </div>
 
             <div style={{ marginBottom:14 }}>

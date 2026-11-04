@@ -243,6 +243,8 @@ class StatusUpdateCreate(BaseModel):
     landlord_name: Optional[str] = None
     landlord_email: Optional[str] = None
     landlord_contact: Optional[str] = None
+    boarding_house_latitude: Optional[float] = None
+    boarding_house_longitude: Optional[float] = None
 
 class StatusUpdateEdit(BaseModel):
     status_type: Optional[Literal["same", "transferred", "moved_home"]] = None
@@ -251,6 +253,8 @@ class StatusUpdateEdit(BaseModel):
     landlord_name: Optional[str] = None
     landlord_email: Optional[str] = None
     landlord_contact: Optional[str] = None
+    boarding_house_latitude: Optional[float] = None
+    boarding_house_longitude: Optional[float] = None
     note: Optional[str] = None
     photo_data_url: Optional[str] = None
     amenities_checklist: Optional[List[str]] = None

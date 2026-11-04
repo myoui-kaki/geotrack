@@ -263,7 +263,7 @@ export default function OsasVerification() {
                           <div style={{fontSize:11,marginTop:4,color:"#6b6457",whiteSpace:"normal"}}>
                             <b>Remarks:</b>{" "}
                             {h.verification_status === "unverified" ? "Waiting for approval of OSAS"
-                              : h.verification_status === "rejected" ? (h.verification_remarks || "-")
+                              : h.verification_status === "rejected" ? ((h.verification_remarks || "").startsWith("Auto-rejected") ? "Rejected by OSAS: the boarding house details could not be verified. You may re-submit with complete details." : (h.verification_remarks || "-"))
                               : "-"}
                           </div>
                         </td>

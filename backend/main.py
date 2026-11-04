@@ -63,6 +63,11 @@ def _ensure_columns():
         if stmts:
             with engine.begin() as conn:
                 for st in stmts: conn.execute(text(st))
+        # The old 7-day auto-reject is gone: replace its leftover remark with a plain reason.
+        with engine.begin() as conn:
+            conn.execute(text(
+                "UPDATE boarding_houses SET verification_remarks = :r WHERE verification_remarks LIKE 'Auto-rejected%'"),
+                {"r": "Rejected by OSAS: the boarding house details could not be verified. You may re-submit with complete details."})
     except Exception as e:  # never block startup
         print("ensure_columns skipped:", e)
 
@@ -822,7 +827,7 @@ def delete_review(rid: int, db: Session = Depends(get_db), user: models.User = D
     log_action(db, user, "delete", "review", rid, None, "Review deleted")
     return {"message": "Deleted"}
 
-def _upsert_student_house(db, user, status_type, name, barangay, landlord, email, contact):
+def _upsert_student_house(db, user, status_type, name, barangay, landlord, email, contact, lat=None, lng=None):
     """Find (by name + barangay) or create the boarding house a student
     reports, and keep its landlord details current."""
     house = None
@@ -839,10 +844,13 @@ def _upsert_student_house(db, user, status_type, name, barangay, landlord, email
     if house is None:
         house = models.BoardingHouse(
             name=name, barangay=barangay, is_verified=False,
+            latitude=lat, longitude=lng,
             submitted_by=f"Student - {user.full_name}", submitted_by_id=user.id)
         db.add(house)
     elif house.rejected_at is not None and house.submitted_by_id == user.id:
         house.rejected_at = None; house.is_verified = False; house.verification_remarks = None
+    if lat is not None and lng is not None:
+        house.latitude = lat; house.longitude = lng
     house.contact_person = landlord
     house.contact_email = email
     house.contact_number = contact
@@ -875,7 +883,8 @@ def submit_status(
         bh_brgy = required["Barangay"].strip()
         house = _upsert_student_house(db, user, payload.status_type, bh_name, bh_brgy,
                                       payload.landlord_name.strip(), payload.landlord_email.strip(),
-                                      payload.landlord_contact.strip())
+                                      payload.landlord_contact.strip(),
+                                      payload.boarding_house_latitude, payload.boarding_house_longitude)
 
     # A photo and amenities checklist of the boarding house are required
     # every month the student is still reporting a boarding house ("same"
@@ -984,6 +993,8 @@ def edit_status(uid: int, payload: schemas.StatusUpdateEdit, db: Session = Depen
     ll_name = (data.pop("landlord_name", None) or "").strip()
     ll_email = (data.pop("landlord_email", None) or "").strip()
     ll_contact = (data.pop("landlord_contact", None) or "").strip()
+    pin_lat = data.pop("boarding_house_latitude", None)
+    pin_lng = data.pop("boarding_house_longitude", None)
     if data.get("status_type") == "transferred":
         nm = (data.get("new_boarding_house_name") or "").strip()
         br = (data.get("new_barangay") or "").strip()
@@ -993,7 +1004,8 @@ def edit_status(uid: int, payload: schemas.StatusUpdateEdit, db: Session = Depen
             raise HTTPException(400, "Please fill in: " + ", ".join(missing) + ".")
         if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", ll_email):
             raise HTTPException(400, "Please enter a valid landlord email address.")
-        house = _upsert_student_house(db, user, "transferred", nm, br, ll_name, ll_email, ll_contact)
+        house = _upsert_student_house(db, user, "transferred", nm, br, ll_name, ll_email, ll_contact,
+                                      pin_lat, pin_lng)
         u.boarding_house_id = house.id
         data["new_boarding_house_name"] = house.name
         data["new_barangay"] = house.barangay

@@ -18,6 +18,8 @@ import { useEffect, useState } from "react";
 import { api } from "../../api/client";
 import MonthCalendar, { monthLabel } from "../../components/MonthCalendar";
 import { dialog } from "../../components/dialogs";
+import BarangaySelect from "../../components/BarangaySelect";
+import LocationPicker from "../../components/LocationPicker";
 
 const now = new Date();
 
@@ -107,6 +109,7 @@ function EditUpdateForm({ update, onCancel, onSaved, onError }) {
   const [statusType, setStatusType] = useState(update.status_type);
   const [newBoardingHouseName, setNewBoardingHouseName] = useState(update.new_boarding_house_name || "");
   const [newBarangay, setNewBarangay] = useState(update.new_barangay || "");
+  const [pin, setPin] = useState(null);
   const [landlord, setLandlord] = useState("");
   const [landlordEmail, setLandlordEmail] = useState("");
   const [landlordContact, setLandlordContact] = useState("");
@@ -135,8 +138,8 @@ function EditUpdateForm({ update, onCancel, onSaved, onError }) {
 
   async function handleSave() {
     if (statusType === "transferred" &&
-        ![newBoardingHouseName, newBarangay, landlord, landlordEmail, landlordContact].every(v => (v || "").trim())) {
-      onError("Please fill in the boarding house name, barangay, landlord name, landlord email and contact number.");
+        (![newBoardingHouseName, newBarangay, landlord, landlordEmail, landlordContact].every(v => (v || "").trim()) || !pin)) {
+      onError("Please fill in the boarding house name, barangay, landlord name, landlord email, contact number and pin the location on the map.");
       return;
     }
     if (showDocumentation && !photoDataUrl) {
@@ -157,6 +160,8 @@ function EditUpdateForm({ update, onCancel, onSaved, onError }) {
         landlord_name: statusType === "transferred" ? landlord.trim() : null,
         landlord_email: statusType === "transferred" ? landlordEmail.trim() : null,
         landlord_contact: statusType === "transferred" ? landlordContact.trim() : null,
+        boarding_house_latitude: statusType === "transferred" ? pin?.lat ?? null : null,
+        boarding_house_longitude: statusType === "transferred" ? pin?.lng ?? null : null,
         note: note || null,
         photo_data_url: showDocumentation ? photoDataUrl : null,
         amenities_checklist: showDocumentation ? amenities : null,
@@ -187,7 +192,7 @@ function EditUpdateForm({ update, onCancel, onSaved, onError }) {
           </div>
           <div className="field">
             <label>Barangay *</label>
-            <input value={newBarangay} onChange={(e) => setNewBarangay(e.target.value)} required />
+            <BarangaySelect value={newBarangay} onChange={setNewBarangay} />
           </div>
           <div className="field">
             <label>Landlord name *</label>
@@ -200,6 +205,10 @@ function EditUpdateForm({ update, onCancel, onSaved, onError }) {
           <div className="field">
             <label>Landlord contact number *</label>
             <input type="tel" value={landlordContact} onChange={(e) => setLandlordContact(e.target.value)} required />
+          </div>
+          <div className="field">
+            <label>Pin the exact location *</label>
+            <LocationPicker value={pin} onChange={setPin} barangay={newBarangay} height={220} />
           </div>
         </>
       )}
@@ -278,9 +287,10 @@ export default function StudentStatus() {
   function chooseStatus(v) {
     setStatusType(v);
     setHouse(v === "same" && current ? current : EMPTY_HOUSE);
-    setAmenities([]); setPhotoDataUrl(null);
+    setAmenities([]); setPhotoDataUrl(null); setPin(null);
   }
-  const houseComplete = Object.values(house).every(v => (v || "").trim());
+  const [pin, setPin] = useState(null);
+  const houseComplete = Object.values(house).every(v => (v || "").trim()) && (statusType !== "transferred" || !!pin);
   const setH = k => e => setHouse({ ...house, [k]: e.target.value });
 
   async function loadUpdates() {
@@ -351,6 +361,8 @@ export default function StudentStatus() {
         landlord_name: showHouseFields ? house.landlord.trim() : null,
         landlord_email: showHouseFields ? house.email.trim() : null,
         landlord_contact: showHouseFields ? house.contact.trim() : null,
+        boarding_house_latitude: statusType === "transferred" ? pin?.lat ?? null : null,
+        boarding_house_longitude: statusType === "transferred" ? pin?.lng ?? null : null,
         note: note || null,
         month_label: CURRENT_MONTH,
         photo_data_url: showDocumentation ? (photoDataUrl || null) : null,
@@ -444,9 +456,17 @@ export default function StudentStatus() {
                  .map(([k, label, type, ph]) => (
                   <div className="field" key={k}>
                     <label>{label}</label>
-                    <input type={type} value={house[k]} onChange={setH(k)} placeholder={ph} required />
+                    {k === "barangay"
+                      ? <BarangaySelect value={house.barangay} onChange={v => setHouse({ ...house, barangay: v })} />
+                      : <input type={type} value={house[k]} onChange={setH(k)} placeholder={ph} required />}
                   </div>
                 ))}
+                {statusType === "transferred" && (
+                  <div className="field">
+                    <label>Pin the exact location of your new boarding house *</label>
+                    <LocationPicker value={pin} onChange={setPin} barangay={house.barangay} height={240} />
+                  </div>
+                )}
                 {statusType === "same" && current && (
                   <div style={{ fontSize: 12, color: "#6b6457", marginBottom: 12 }}>
                     Your boarding house details are already on file above. Choose "Transferred" if you moved to a new boarding house.

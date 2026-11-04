@@ -13,6 +13,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { STUDENT_TERMS, STAFF_TERMS } from "./termsText";
+import BarangaySelect from "./BarangaySelect";
 
 // A Google OAuth *client ID* is public by design (it's visible in every
 // site that uses Google sign-in) - it is not the secret. The fallback keeps
@@ -134,7 +135,7 @@ export default function GoogleSignInButton({ role, onSuccess, onError, divider =
             {role === "barangay" && (
               <div style={{ marginBottom: 12, display: "grid", gap: 10 }}>
                 <div><label style={{ display: "block", fontSize: 12.5, fontWeight: 600, marginBottom: 6, color: "#544f43" }}>Barangay you represent *</label>
-                  <input value={barangayName} onChange={e => setBarangayName(e.target.value)} placeholder="e.g. Brgy. Del Remedio" style={{ width: "100%", padding: "11px 12px", borderRadius: 10, border: "1px solid var(--line)", fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }} /></div>
+<BarangaySelect value={barangayName} onChange={setBarangayName} /></div>
                 <div><label style={{ display: "block", fontSize: 12.5, fontWeight: 600, marginBottom: 6, color: "#544f43" }}>Full name *</label>
                   <input value={bFullName} onChange={e => setBFullName(e.target.value)} style={{ width: "100%", padding: "11px 12px", borderRadius: 10, border: "1px solid var(--line)", fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }} /></div>
                 <div><label style={{ display: "block", fontSize: 12.5, fontWeight: 600, marginBottom: 6, color: "#544f43" }}>Position *</label>
