@@ -81,6 +81,27 @@ class RegisterOsasRequest(BaseModel):
     def check_strength(cls, v): return validate_strong_password(v)
 
 
+class RegisterBarangayRequest(BaseModel):
+    full_name: str
+    position: str
+    email: EmailStr
+    contact_number: str
+    barangay_name: str
+    password: str
+
+    @field_validator("full_name", "position", "contact_number", "barangay_name")
+    @classmethod
+    def not_blank(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("This field is required.")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def check_strength(cls, v): return validate_strong_password(v)
+
+
 class GoogleAuthRequest(BaseModel):
     # The Google ID token (JWT) returned by Google Identity Services on the
     # frontend - main.py verifies this server-side before trusting anything

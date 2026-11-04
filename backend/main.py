@@ -108,6 +108,7 @@ _RATE_RULES = {            # path -> (max requests, window seconds)
     "/api/auth/2fa/verify": (15, 300),
     "/api/auth/verify-otp": (15, 300),
     "/api/auth/resend-otp": (5, 300),
+    "/api/auth/register/barangay": (10, 600),
     "/api/auth/forgot-password": (5, 600),
     "/api/auth/reset-password": (10, 600),
 }
@@ -484,6 +485,23 @@ def register_osas(payload: schemas.RegisterOsasRequest, db: Session = Depends(ge
                        is_email_verified=True)
     db.add(user); db.commit(); db.refresh(user)
     log_action(db, user, "create", "user", user.id, user.full_name, "OSAS admin registered")
+    token = create_access_token({"sub": str(user.id), "role": user.role})
+    return schemas.TokenResponse(access_token=token, role=user.role, full_name=user.full_name)
+
+
+@app.post("/api/auth/register/barangay", response_model=schemas.TokenResponse)
+def register_barangay(payload: schemas.RegisterBarangayRequest, db: Session = Depends(get_db)):
+    email = str(payload.email).lower().strip()
+    if db.query(models.User).filter(models.User.email == email).first():
+        raise HTTPException(400, "Email already registered.")
+    user = models.User(full_name=payload.full_name, email=email,
+                       hashed_password=hash_password(payload.password),
+                       role="barangay", position=payload.position,
+                       contact_number=payload.contact_number, barangay_name=payload.barangay_name,
+                       is_email_verified=True)
+    db.add(user); db.commit(); db.refresh(user)
+    log_action(db, user, "create", "user", user.id, user.full_name,
+               f"Barangay account registered ({payload.barangay_name})")
     token = create_access_token({"sub": str(user.id), "role": user.role})
     return schemas.TokenResponse(access_token=token, role=user.role, full_name=user.full_name)
 

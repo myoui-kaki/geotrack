@@ -78,6 +78,7 @@ async function loginRequest(email, password) {
 export const api = {
   getToken, getRole, getFullName, setSession, clearSession, loginRequest, AuthError,
   registerStudent:  p => request("/auth/register/student", {method:"POST",body:p}),
+  registerBarangay: p => request("/auth/register/barangay", {method:"POST",body:p}),
   registerOsasAdmin:p => request("/auth/register/osas",   {method:"POST",body:p}),
   // role: "student" | "osas" | "barangay" - matches the path prefix, and
   // the backend route (/auth/google/<role>) one-to-one. extra is only ever
