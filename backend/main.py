@@ -531,12 +531,37 @@ def google_auth_student(payload: schemas.GoogleAuthRequest, db: Session = Depend
         if not payload.accept_terms:
             return schemas.TokenResponse(access_token="", role="student", requires_terms=True,
                                          full_name=info.get("name") or email.split("@")[0])
+        g = lambda v: (v or "").strip()
+        dept = g(payload.department).upper(); sex = g(payload.gender).lower()
+        fields = [("full name", g(payload.full_name)), ("course & section", g(payload.course_section)),
+                  ("department", dept), ("sex", sex), ("boarding house name", g(payload.boarding_house_name)),
+                  ("barangay", g(payload.boarding_house_barangay)), ("landlord name", g(payload.landlord_name)),
+                  ("landlord email", g(payload.landlord_email)), ("landlord contact number", g(payload.landlord_contact))]
+        missing = [l for l, v in fields if not v]
+        if missing:
+            raise HTTPException(400, "Please fill in: " + ", ".join(missing) + ".")
+        if dept not in DEPARTMENTS: raise HTTPException(400, "Please choose a valid department.")
+        if sex not in ("male", "female"): raise HTTPException(400, "Sex must be male or female.")
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", g(payload.landlord_email)):
+            raise HTTPException(400, "Please enter a valid landlord email address.")
         user = models.User(
-            full_name=info.get("name") or email.split("@")[0],
+            full_name=g(payload.full_name),
             email=email, hashed_password=hash_password(secrets.token_urlsafe(32)),
             role="student", is_email_verified=True, google_sub=info["sub"],
+            course_section=g(payload.course_section), department=dept, gender=sex,
         )
         db.add(user); db.commit(); db.refresh(user)
+        house = _upsert_student_house(db, user, "same", g(payload.boarding_house_name), g(payload.boarding_house_barangay),
+                                      g(payload.landlord_name), g(payload.landlord_email), g(payload.landlord_contact),
+                                      payload.boarding_house_latitude, payload.boarding_house_longitude)
+        now_ = datetime.utcnow()
+        db.add(models.StatusUpdate(student_id=user.id, boarding_house_id=house.id, status_type="same",
+                                   month_label=now_.strftime("%B %Y")))
+        db.add(models.StudentCompliance(student_id=user.id, month=now_.strftime("%B"), year=now_.year,
+                                        submission_status="Submitted", submitted_at=now_,
+                                        deadline=datetime(now_.year, now_.month, COMPLIANCE_DEADLINE_DAY),
+                                        remarks="Initial registration"))
+        db.commit()
         log_action(db, user, "create", "user", user.id, user.full_name, "Student registered via Google")
     elif not user.google_sub:
         user.google_sub = info["sub"]; user.is_email_verified = True
@@ -559,8 +584,12 @@ def google_auth_osas(payload: schemas.GoogleAuthRequest, db: Session = Depends(g
         if not payload.accept_terms:
             return schemas.TokenResponse(access_token="", role="osas_admin", requires_terms=True,
                                          full_name=info.get("name") or email.split("@")[0])
+        full_name = (payload.full_name or "").strip(); position = (payload.position or "").strip()
+        missing = [l for l, v in (("full name", full_name), ("position", position)) if not v]
+        if missing:
+            raise HTTPException(400, "Please fill in: " + ", ".join(missing) + ".")
         user = models.User(
-            full_name=info.get("name") or email.split("@")[0],
+            full_name=full_name, position=position,
             email=email, hashed_password=hash_password(secrets.token_urlsafe(32)),
             role="osas_admin", is_email_verified=True, google_sub=info["sub"],
         )

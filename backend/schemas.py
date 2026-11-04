@@ -116,6 +116,17 @@ class GoogleAuthRequest(BaseModel):
     full_name: Optional[str] = None
     position: Optional[str] = None
     contact_number: Optional[str] = None
+    # Student sign-up details (required when a new student account is created)
+    course_section: Optional[str] = None
+    department: Optional[str] = None
+    gender: Optional[str] = None
+    boarding_house_name: Optional[str] = None
+    boarding_house_barangay: Optional[str] = None
+    boarding_house_latitude: Optional[float] = None
+    boarding_house_longitude: Optional[float] = None
+    landlord_name: Optional[str] = None
+    landlord_email: Optional[str] = None
+    landlord_contact: Optional[str] = None
     # A brand-new account is only created once this is True (the person has
     # agreed to the Terms & Conditions). Existing accounts ignore it.
     accept_terms: bool = False
